@@ -1,0 +1,53 @@
+version: "2"
+run:
+  timeout: 5m
+  allow-parallel-runners: true
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - decorder
+    - gocritic
+    - gocyclo
+    - gosec
+    - zerologlint
+    - testifylint
+    - paralleltest
+    - copyloopvar
+    - godox
+    - revive
+    - depguard
+  settings:
+    godox:
+      keywords:
+        - "DEBUG"
+        - "TODO"
+    gosec:
+      confidence: medium
+    depguard:
+      rules:
+        main:
+          list-mode: lax
+          deny:
+            - pkg: github.com/test-go/testify
+              desc: "Use github.com/stretchr/testify instead"
+            - pkg: github.com/testify/testify
+              desc: "Use github.com/stretchr/testify instead"
+            - pkg: gotest.tools/v3/assert
+              desc: "Use github.com/stretchr/testify/assert instead"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+    - golines
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/smartcontractkit/codeowners-attribution
+    golines:
+      max-len: 120

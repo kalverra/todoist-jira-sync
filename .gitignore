@@ -1,0 +1,6 @@
+out/
+.vscode/
+.DS_Store
+
+# Temp files
+x.*
