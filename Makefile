@@ -9,3 +9,6 @@ test:
 
 test_race:
 	go tool gotestsum -- -race ./...
+
+test_e2e:
+	RUN_E2E_TESTS=true go tool gotestsum -- -cover ./...

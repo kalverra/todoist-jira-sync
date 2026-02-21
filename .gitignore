@@ -1,6 +1,7 @@
 out/
 .vscode/
 .DS_Store
+.env
 
 # Temp files
 x.*
