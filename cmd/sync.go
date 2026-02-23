@@ -18,9 +18,12 @@ var syncCmd = &cobra.Command{
 		}
 
 		todoistClient := todoist.NewClient(cfg.TodoistToken, logger)
-		jiraClient := jira.NewClient(
+		jiraClient, err := jira.NewClient(
 			cfg.JiraURL, cfg.JiraEmail, cfg.JiraToken, logger,
 		)
+		if err != nil {
+			return err
+		}
 		engine := syncer.NewEngine(
 			todoistClient, jiraClient, &cfg, logger,
 		)

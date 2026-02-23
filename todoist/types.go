@@ -93,11 +93,12 @@ type Project struct {
 
 // CreateTaskRequest is the payload for creating a new Todoist task.
 type CreateTaskRequest struct {
-	Content     string `json:"content"`
-	Description string `json:"description,omitempty"`
-	ProjectID   string `json:"project_id,omitempty"`
-	SectionID   string `json:"section_id,omitempty"`
-	DueDate     string `json:"due_date,omitempty"`
+	Content     string   `json:"content"`
+	Description string   `json:"description,omitempty"`
+	ProjectID   string   `json:"project_id,omitempty"`
+	SectionID   string   `json:"section_id,omitempty"`
+	DueDate     string   `json:"due_date,omitempty"`
+	Labels      []string `json:"labels,omitempty"`
 }
 
 // UpdateTaskRequest is the payload for updating a Todoist task.

@@ -67,6 +67,12 @@ func init() {
 		&cfg.JiraProject, "jira-project", "",
 		"Jira project key (env: JIRA_PROJECT)",
 	)
+	flags.StringVar(
+		&cfg.JiraIssueTypesStr,
+		"jira-issue-types",
+		"",
+		"Comma-separated Jira issue types to sync, e.g. Story,Task,Bug (env: JIRA_ISSUE_TYPES; default: Story,Task,Bug)",
+	)
 	flags.DurationVar(
 		&cfg.Interval, "interval", 5*time.Minute,
 		"Polling interval for watch mode (env: SYNC_INTERVAL)",
@@ -99,6 +105,9 @@ func bindEnv(c *config.Config) {
 	}
 	if v := os.Getenv("JIRA_PROJECT"); v != "" && c.JiraProject == "" {
 		c.JiraProject = v
+	}
+	if v := os.Getenv("JIRA_ISSUE_TYPES"); v != "" && c.JiraIssueTypesStr == "" {
+		c.JiraIssueTypesStr = v
 	}
 	if v := os.Getenv("SYNC_INTERVAL"); v != "" && c.Interval == 0 {
 		if d, err := time.ParseDuration(v); err == nil {

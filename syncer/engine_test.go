@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	jiraCloud "github.com/andygrunwald/go-jira/v2/cloud"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog"
@@ -62,7 +63,8 @@ func e2eSetup(t *testing.T) *e2eEnv {
 	require.NoError(t, cfg.Validate())
 
 	tc := todoist.NewClient(cfg.TodoistToken, logger)
-	jc := jira.NewClient(cfg.JiraURL, cfg.JiraEmail, cfg.JiraToken, logger)
+	jc, err := jira.NewClient(cfg.JiraURL, cfg.JiraEmail, cfg.JiraToken, logger)
+	require.NoError(t, err)
 	engine := NewEngine(tc, jc, cfg, logger)
 
 	project, err := tc.FindProjectByName(
@@ -94,99 +96,7 @@ func TestSyncTodoistToJira(t *testing.T) { //nolint:paralleltest
 		Description: "todoist to jira test",
 		ProjectID:   env.projectID,
 		DueDate:     "2026-12-25",
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		cleanupCtx := context.Background()
-		if err := env.todoistClient.DeleteTask(
-			cleanupCtx, task.ID,
-		); err != nil {
-			t.Logf("cleanup: delete todoist task %s: %v", task.ID, err)
-		}
-	})
-
-	require.NoError(t, env.engine.Run(ctx))
-
-	updatedTask, err := env.todoistClient.GetTask(ctx, task.ID)
-	require.NoError(t, err)
-	jiraKey := ExtractJiraKey(updatedTask.Description)
-	require.NotEmpty(t, jiraKey, "todoist task should have jira key in description")
-	t.Cleanup(func() {
-		if err := env.jiraClient.DeleteIssue(
-			context.Background(), jiraKey,
-		); err != nil {
-			t.Logf("cleanup: delete jira issue %s: %v", jiraKey, err)
-		}
-	})
-
-	issue, err := env.jiraClient.GetIssue(ctx, jiraKey)
-	require.NoError(t, err)
-	assert.Equal(t, taskName, issue.Fields.Summary)
-	assert.Contains(t, issue.Fields.Description, "todoist to jira test")
-	assert.Equal(t, "2026-12-25", issue.Fields.DueDate)
-
-	todoistID := ExtractTodoistID(issue.Fields.Description)
-	assert.Equal(t, task.ID, todoistID)
-}
-
-func TestSyncJiraToTodoist(t *testing.T) { //nolint:paralleltest
-	env := e2eSetup(t)
-	ctx := context.Background()
-
-	summary := fmt.Sprintf("e2e-sync-j2t-%s", testID())
-	created, err := env.jiraClient.CreateIssue(ctx, jira.CreateIssueRequest{
-		Fields: jira.CreateIssueFields{
-			Project:     jira.IssueProject{Key: env.cfg.JiraProject},
-			Summary:     summary,
-			Description: "jira to todoist test",
-			IssueType:   jira.IssueType{Name: "Task"},
-			DueDate:     "2026-11-15",
-		},
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		if err := env.jiraClient.DeleteIssue(
-			context.Background(), created.Key,
-		); err != nil {
-			t.Logf("cleanup: delete jira issue %s: %v", created.Key, err)
-		}
-	})
-
-	require.NoError(t, env.engine.Run(ctx))
-
-	issue, err := env.jiraClient.GetIssue(ctx, created.Key)
-	require.NoError(t, err)
-	todoistID := ExtractTodoistID(issue.Fields.Description)
-	require.NotEmpty(t, todoistID,
-		"jira issue should have todoist id in description",
-	)
-	t.Cleanup(func() {
-		if err := env.todoistClient.DeleteTask(
-			context.Background(), todoistID,
-		); err != nil {
-			t.Logf("cleanup: delete todoist task %s: %v", todoistID, err)
-		}
-	})
-
-	task, err := env.todoistClient.GetTask(ctx, todoistID)
-	require.NoError(t, err)
-	assert.Equal(t, summary, task.Content)
-	assert.Contains(t, task.Description, "jira to todoist test")
-	require.NotNil(t, task.Due)
-	assert.Equal(t, "2026-11-15", task.Due.Date)
-
-	jiraKey := ExtractJiraKey(task.Description)
-	assert.Equal(t, created.Key, jiraKey)
-}
-
-func TestSyncComments(t *testing.T) { //nolint:paralleltest
-	env := e2eSetup(t)
-	ctx := context.Background()
-
-	taskName := fmt.Sprintf("e2e-sync-comments-%s", testID())
-	task, err := env.todoistClient.CreateTask(ctx, todoist.CreateTaskRequest{
-		Content:   taskName,
-		ProjectID: env.projectID,
+		Labels:      []string{linkLabel},
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -201,10 +111,98 @@ func TestSyncComments(t *testing.T) { //nolint:paralleltest
 
 	updatedTask, err := env.todoistClient.GetTask(ctx, task.ID)
 	require.NoError(t, err)
-	jiraKey := ExtractJiraKey(updatedTask.Description)
+	jiraKey := ExtractJiraKey(updatedTask.Content)
+	require.NotEmpty(t, jiraKey, "todoist task content should have jira key prefix")
+	t.Cleanup(func() {
+		if _, err := env.jiraClient.Issue.Delete(
+			context.Background(), jiraKey,
+		); err != nil {
+			t.Logf("cleanup: delete jira issue %s: %v", jiraKey, err)
+		}
+	})
+
+	issue, _, err := env.jiraClient.Issue.Get(ctx, jiraKey, nil)
+	require.NoError(t, err)
+	assert.Equal(t, taskName, issue.Fields.Summary)
+	assert.Contains(t, issue.Fields.Description, "todoist to jira test")
+	assert.Equal(t, taskName, StripJiraPrefix(updatedTask.Content))
+}
+
+func TestSyncJiraToTodoist(t *testing.T) { //nolint:paralleltest
+	env := e2eSetup(t)
+	ctx := context.Background()
+
+	summary := fmt.Sprintf("e2e-sync-j2t-%s", testID())
+	created, _, err := env.jiraClient.Issue.Create(ctx, &jiraCloud.Issue{
+		Fields: &jiraCloud.IssueFields{
+			Project:     jiraCloud.Project{Key: env.cfg.JiraProject},
+			Summary:     summary,
+			Description: "jira to todoist test",
+			Type:        jiraCloud.IssueType{Name: "Task"},
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		if _, err := env.jiraClient.Issue.Delete(
+			context.Background(), created.Key,
+		); err != nil {
+			t.Logf("cleanup: delete jira issue %s: %v", created.Key, err)
+		}
+	})
+
+	require.NoError(t, env.engine.Run(ctx))
+
+	tasks, err := env.todoistClient.GetTasks(ctx, env.projectID)
+	require.NoError(t, err)
+
+	var linkedTask *todoist.Task
+	for i := range tasks {
+		if ExtractJiraKey(tasks[i].Content) == created.Key {
+			linkedTask = &tasks[i]
+			break
+		}
+	}
+	require.NotNil(t, linkedTask, "should find todoist task linked to %s", created.Key)
+	t.Cleanup(func() {
+		if err := env.todoistClient.DeleteTask(
+			context.Background(), linkedTask.ID,
+		); err != nil {
+			t.Logf("cleanup: delete todoist task %s: %v", linkedTask.ID, err)
+		}
+	})
+
+	assert.Equal(t, summary, StripJiraPrefix(linkedTask.Content))
+	assert.Contains(t, linkedTask.Description, "jira to todoist test")
+	assert.Contains(t, linkedTask.Labels, linkLabel)
+}
+
+func TestSyncComments(t *testing.T) { //nolint:paralleltest
+	env := e2eSetup(t)
+	ctx := context.Background()
+
+	taskName := fmt.Sprintf("e2e-sync-comments-%s", testID())
+	task, err := env.todoistClient.CreateTask(ctx, todoist.CreateTaskRequest{
+		Content:   taskName,
+		ProjectID: env.projectID,
+		Labels:    []string{linkLabel},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		if err := env.todoistClient.DeleteTask(
+			context.Background(), task.ID,
+		); err != nil {
+			t.Logf("cleanup: delete todoist task %s: %v", task.ID, err)
+		}
+	})
+
+	require.NoError(t, env.engine.Run(ctx))
+
+	updatedTask, err := env.todoistClient.GetTask(ctx, task.ID)
+	require.NoError(t, err)
+	jiraKey := ExtractJiraKey(updatedTask.Content)
 	require.NotEmpty(t, jiraKey)
 	t.Cleanup(func() {
-		if err := env.jiraClient.DeleteIssue(
+		if _, err := env.jiraClient.Issue.Delete(
 			context.Background(), jiraKey,
 		); err != nil {
 			t.Logf("cleanup: delete jira issue %s: %v", jiraKey, err)
@@ -219,21 +217,22 @@ func TestSyncComments(t *testing.T) { //nolint:paralleltest
 	require.NoError(t, err)
 
 	jiraComment := fmt.Sprintf("jira comment %s", testID())
-	_, err = env.jiraClient.AddComment(ctx, jiraKey, jiraComment)
+	_, _, err = env.jiraClient.Issue.AddComment(ctx, jiraKey, &jiraCloud.Comment{Body: jiraComment})
 	require.NoError(t, err)
 
-	// Wait briefly for API consistency before syncing comments
 	time.Sleep(2 * time.Second)
 
 	require.NoError(t, env.engine.Run(ctx))
 
-	jiraComments, err := env.jiraClient.GetComments(ctx, jiraKey)
+	issue, _, err := env.jiraClient.Issue.Get(ctx, jiraKey, nil)
 	require.NoError(t, err)
 	foundTodoistComment := false
-	for _, c := range jiraComments {
-		if c.Body == "[From Todoist] "+todoistComment {
-			foundTodoistComment = true
-			break
+	if issue.Fields.Comments != nil {
+		for _, c := range issue.Fields.Comments.Comments {
+			if c.Body == "[From Todoist] "+todoistComment {
+				foundTodoistComment = true
+				break
+			}
 		}
 	}
 	assert.True(t, foundTodoistComment,
@@ -262,6 +261,7 @@ func TestSyncStatusChange(t *testing.T) { //nolint:paralleltest
 	task, err := env.todoistClient.CreateTask(ctx, todoist.CreateTaskRequest{
 		Content:   taskName,
 		ProjectID: env.projectID,
+		Labels:    []string{linkLabel},
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -276,20 +276,19 @@ func TestSyncStatusChange(t *testing.T) { //nolint:paralleltest
 
 	updatedTask, err := env.todoistClient.GetTask(ctx, task.ID)
 	require.NoError(t, err)
-	jiraKey := ExtractJiraKey(updatedTask.Description)
+	jiraKey := ExtractJiraKey(updatedTask.Content)
 	require.NotEmpty(t, jiraKey)
 	t.Cleanup(func() {
-		if err := env.jiraClient.DeleteIssue(
+		if _, err := env.jiraClient.Issue.Delete(
 			context.Background(), jiraKey,
 		); err != nil {
 			t.Logf("cleanup: delete jira issue %s: %v", jiraKey, err)
 		}
 	})
 
-	err = env.jiraClient.TransitionIssueTo(ctx, jiraKey, "In Progress")
+	_, err = env.jiraClient.Issue.DoTransition(ctx, jiraKey, "In Progress")
 	require.NoError(t, err)
 
-	// Wait for Jira to update the timestamp
 	time.Sleep(2 * time.Second)
 
 	require.NoError(t, env.engine.Run(ctx))
@@ -323,6 +322,7 @@ func TestSyncDueDateUpdate(t *testing.T) { //nolint:paralleltest
 		Content:   taskName,
 		ProjectID: env.projectID,
 		DueDate:   "2026-06-01",
+		Labels:    []string{linkLabel},
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -337,10 +337,10 @@ func TestSyncDueDateUpdate(t *testing.T) { //nolint:paralleltest
 
 	updatedTask, err := env.todoistClient.GetTask(ctx, task.ID)
 	require.NoError(t, err)
-	jiraKey := ExtractJiraKey(updatedTask.Description)
+	jiraKey := ExtractJiraKey(updatedTask.Content)
 	require.NotEmpty(t, jiraKey)
 	t.Cleanup(func() {
-		if err := env.jiraClient.DeleteIssue(
+		if _, err := env.jiraClient.Issue.Delete(
 			context.Background(), jiraKey,
 		); err != nil {
 			t.Logf("cleanup: delete jira issue %s: %v", jiraKey, err)
@@ -348,12 +348,15 @@ func TestSyncDueDateUpdate(t *testing.T) { //nolint:paralleltest
 	})
 
 	newDue := "2027-03-15"
-	err = env.jiraClient.UpdateIssue(ctx, jiraKey, jira.UpdateIssueRequest{
-		Fields: map[string]any{"duedate": newDue},
-	})
+	newDueTime, _ := time.Parse("2006-01-02", newDue)
+	_, _, err = env.jiraClient.Issue.Update(ctx, &jiraCloud.Issue{
+		Key: jiraKey,
+		Fields: &jiraCloud.IssueFields{
+			Duedate: jiraCloud.Date(newDueTime),
+		},
+	}, nil)
 	require.NoError(t, err)
 
-	// Wait for Jira to update the timestamp
 	time.Sleep(2 * time.Second)
 
 	require.NoError(t, env.engine.Run(ctx))

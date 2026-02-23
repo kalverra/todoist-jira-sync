@@ -21,6 +21,7 @@ linters:
     - godox
     - revive
     - depguard
+    - modernize
   settings:
     godox:
       keywords:
