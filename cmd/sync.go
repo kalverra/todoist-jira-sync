@@ -12,11 +12,6 @@ var syncCmd = &cobra.Command{
 	Use:   "sync",
 	Short: "Run a single sync cycle between Todoist and Jira",
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		bindEnv(&cfg)
-		if err := cfg.Validate(); err != nil {
-			return err
-		}
-
 		todoistClient := todoist.NewClient(cfg.TodoistToken, logger)
 		jiraClient, err := jira.NewClient(
 			cfg.JiraURL, cfg.JiraEmail, cfg.JiraToken, logger,
@@ -25,7 +20,7 @@ var syncCmd = &cobra.Command{
 			return err
 		}
 		engine := syncer.NewEngine(
-			todoistClient, jiraClient, &cfg, logger,
+			todoistClient, jiraClient, cfg, logger,
 		)
 
 		return engine.Run(cmd.Context())

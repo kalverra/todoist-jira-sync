@@ -8,7 +8,9 @@ import (
 	"time"
 
 	jiraCloud "github.com/andygrunwald/go-jira/v2/cloud"
+	"github.com/ankitpokhrel/jira-cli/pkg/md"
 	"github.com/rs/zerolog"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/kalverra/todoist-jira-sync/config"
 	"github.com/kalverra/todoist-jira-sync/jira"
@@ -16,10 +18,9 @@ import (
 )
 
 const (
-	commentFromJira    = "[From Jira] "
-	commentFromTodoist = "[From Todoist] "
-	defaultIssueType   = "Story"
-	linkLabel          = "jira-sync"
+	commentFromJiraPrefix = "[From Jira %s] " // %s is the Jira issue key
+	defaultIssueType      = "Story"
+	linkLabel             = "jira-sync"
 )
 
 // Engine orchestrates bidirectional sync between Todoist and Jira.
@@ -50,48 +51,159 @@ type sectionMap struct {
 	byName map[string]string
 }
 
+type syncAction struct {
+	jiraKey string
+	summary string
+}
+
+type syncSummary struct {
+	createdJira      []syncAction
+	createdTodoist   []syncAction
+	updatedToTodoist []syncAction
+	updatedToJira    []syncAction
+	completedTodoist []syncAction
+	resolvedJira     []syncAction
+	errors           []syncAction
+}
+
+func (s *syncSummary) print(duration time.Duration) {
+	var b strings.Builder
+	b.WriteString("\n================================\n")
+	b.WriteString("  Sync Summary\n")
+	b.WriteString("================================\n")
+
+	sections := []struct {
+		label   string
+		actions []syncAction
+	}{
+		{"Created in Jira", s.createdJira},
+		{"Created in Todoist", s.createdTodoist},
+		{"Updated Jira -> Todoist", s.updatedToTodoist},
+		{"Updated Todoist -> Jira", s.updatedToJira},
+		{"Completed in Todoist", s.completedTodoist},
+		{"Resolved in Jira", s.resolvedJira},
+		{"Errors", s.errors},
+	}
+
+	anyActivity := false
+	for _, sec := range sections {
+		if len(sec.actions) == 0 {
+			continue
+		}
+		anyActivity = true
+		fmt.Fprintf(&b, "\n%s (%d):\n", sec.label, len(sec.actions))
+		for _, a := range sec.actions {
+			if a.jiraKey != "" {
+				fmt.Fprintf(&b, "  - [%s] %s\n", a.jiraKey, a.summary)
+			} else {
+				fmt.Fprintf(&b, "  - %s\n", a.summary)
+			}
+		}
+	}
+
+	if !anyActivity {
+		b.WriteString("\nEverything is up to date.\n")
+	}
+
+	fmt.Fprintf(&b, "\nCompleted in %s\n", duration.Truncate(time.Millisecond))
+	b.WriteString("================================\n")
+	fmt.Print(b.String())
+}
+
 // Run executes a single sync cycle.
 func (e *Engine) Run(ctx context.Context) error {
-	e.logger.Info().Msg("starting sync cycle")
+	start := time.Now()
+	e.logger.Info().Msg("syncing todoist and jira")
 
-	project, err := e.todoist.FindProjectByName(ctx, e.cfg.TodoistProject)
-	if err != nil {
-		return fmt.Errorf("find todoist project: %w", err)
-	}
-	e.logger.Info().
-		Str("project_id", project.ID).
-		Str("project_name", project.Name).
-		Msg("found todoist project")
+	var (
+		project              *todoist.Project
+		sections             []todoist.Section
+		secMap               sectionMap
+		tasks                []todoist.Task
+		completedTodoistKeys map[string]bool
+		issues               []jiraCloud.Issue
+		eg                   = errgroup.Group{}
+		summary              syncSummary
+	)
 
-	sections, err := e.todoist.GetSections(ctx, project.ID)
-	if err != nil {
-		return fmt.Errorf("get todoist sections: %w", err)
-	}
-	secMap := buildSectionMap(sections)
+	eg.Go(func() error {
+		var todoistErr error
+		project, todoistErr = e.todoist.FindProjectByName(ctx, e.cfg.TodoistProject)
+		if todoistErr != nil {
+			return fmt.Errorf("find todoist project: %w", todoistErr)
+		}
+		e.logger.Debug().
+			Str("project_id", project.ID).
+			Str("project_name", project.Name).
+			Msg("found todoist project")
 
-	tasks, err := e.todoist.GetTasks(ctx, project.ID)
-	if err != nil {
-		return fmt.Errorf("get todoist tasks: %w", err)
-	}
-	e.logger.Debug().Int("count", len(tasks)).Msg("fetched todoist tasks")
+		sections, todoistErr = e.todoist.GetSections(ctx, project.ID)
+		if todoistErr != nil {
+			return fmt.Errorf("get todoist sections: %w", todoistErr)
+		}
+		secMap = buildSectionMap(sections)
 
-	jql := "project = " + e.cfg.JiraProject + " AND assignee = currentUser()"
-	if typesJQL := e.cfg.JiraIssueTypesJQL(); typesJQL != "" {
-		jql += " AND " + typesJQL
-	}
-	jql += " ORDER BY updated DESC"
-	issues, _, err := e.jira.Issue.Search(ctx, jql, &jiraCloud.SearchOptions{
-		MaxResults: 100,
-		StartAt:    0,
+		tasks, todoistErr = e.todoist.GetTasks(ctx, project.ID)
+		if todoistErr != nil {
+			return fmt.Errorf("get todoist tasks: %w", todoistErr)
+		}
+
+		// Fetch recently completed Todoist tasks to detect Todoist→Jira completions.
+		since := time.Now().Add(-72 * time.Hour).UTC().Format(time.RFC3339)
+		until := time.Now().UTC().Format(time.RFC3339)
+		completedTasks, err := e.todoist.GetCompletedTasks(ctx, project.ID, since, until)
+		if err != nil {
+			e.logger.Warn().Err(err).Msg("failed to fetch completed todoist tasks, skipping completion sync")
+		} else {
+			for _, ct := range completedTasks {
+				if key := ExtractJiraKey(ct.Content); key != "" {
+					completedTodoistKeys[key] = true
+				}
+			}
+		}
+
+		e.logger.Debug().Int("count", len(tasks)).Msg("fetched todoist tasks")
+		return nil
 	})
+
+	eg.Go(func() error {
+		var jiraErr error
+		jql := "project = " + e.cfg.JiraProject +
+			" AND assignee = currentUser()"
+		if typesJQL := e.cfg.JiraIssueTypesJQL(); typesJQL != "" {
+			jql += " AND " + typesJQL
+		}
+		jql += " ORDER BY updated DESC"
+		issues, _, jiraErr = e.jira.Issue.SearchV2JQL(ctx, jql, &jiraCloud.SearchOptionsV2{
+			MaxResults: 200,
+			Fields: []string{
+				"key",
+				"summary",
+				"description",
+				"status",
+				"updated",
+				"duedate",
+				"comments",
+				"priority",
+				"resolution",
+				"sprint",
+			},
+		})
+		if jiraErr != nil {
+			return fmt.Errorf("search jira issues: %w", jiraErr)
+		}
+		e.logger.Debug().Int("count", len(issues)).Msg("fetched jira issues")
+		return nil
+	})
+
+	err := eg.Wait()
 	if err != nil {
-		return fmt.Errorf("search jira issues: %w", err)
+		return fmt.Errorf("sync: %w", err)
 	}
-	e.logger.Debug().Int("count", len(issues)).Msg("fetched jira issues")
 
 	// Classify Todoist tasks:
 	// - Has Jira key prefix in content -> linked
-	// - Has jira-sync label but no key -> unlinked, needs Jira issue
+	// - Has jira-sync label but no key -> unlinked, needs Jira issue.
 	// - No label -> ignored
 	todoistByJiraKey := make(map[string]*todoist.Task)
 	var unlinkedTodoistTasks []*todoist.Task
@@ -104,30 +216,52 @@ func (e *Engine) Run(ctx context.Context) error {
 		}
 	}
 
-	// Classify Jira issues: if already linked to a Todoist task, skip;
-	// otherwise create a Todoist task.
+	// Classify Jira issues:
+	// - Linked to an active Todoist task -> sync pair
+	// - Not linked but matching a recently completed Todoist task -> resolve Jira
+	// - Already resolved -> skip
+	// - Otherwise -> new, create Todoist task
 	var unlinkedJiraIssues []*jiraCloud.Issue
 	for i := range issues {
-		if _, linked := todoistByJiraKey[issues[i].Key]; !linked {
-			unlinkedJiraIssues = append(unlinkedJiraIssues, &issues[i])
+		if _, linked := todoistByJiraKey[issues[i].Key]; linked {
+			continue
 		}
+		if completedTodoistKeys[issues[i].Key] {
+			e.resolveJiraIssue(ctx, &issues[i], &summary)
+			continue
+		}
+		if issues[i].Fields.Resolution != nil {
+			continue
+		}
+		if issues[i].Fields.Sprint == nil || issues[i].Fields.Sprint.State != "active" {
+			e.logger.Debug().
+				Str("issue_key", issues[i].Key).
+				Msg("jira issue not in active sprint, skipping todoist creation")
+			continue
+		}
+		unlinkedJiraIssues = append(unlinkedJiraIssues, &issues[i])
 	}
 
 	for _, task := range unlinkedTodoistTasks {
-		if err := e.createJiraFromTodoist(ctx, task, secMap); err != nil {
+		if err := e.createJiraFromTodoist(ctx, task, secMap, &summary); err != nil {
 			e.logger.Error().Err(err).
 				Str("task_id", task.ID).
 				Str("task", task.Content).
 				Msg("failed to create jira issue from todoist task")
+			summary.errors = append(summary.errors, syncAction{summary: "create Jira from: " + task.Content})
 		}
 	}
 
 	for _, issue := range unlinkedJiraIssues {
-		if err := e.createTodoistFromJira(ctx, issue, project.ID, secMap); err != nil {
+		if err := e.createTodoistFromJira(ctx, issue, project.ID, secMap, &summary); err != nil {
 			e.logger.Error().Err(err).
 				Str("issue_key", issue.Key).
 				Str("summary", issue.Fields.Summary).
 				Msg("failed to create todoist task from jira issue")
+			summary.errors = append(
+				summary.errors,
+				syncAction{jiraKey: issue.Key, summary: "create Todoist from: " + issue.Fields.Summary},
+			)
 		}
 	}
 
@@ -137,18 +271,29 @@ func (e *Engine) Run(ctx context.Context) error {
 			e.logger.Warn().
 				Str("jira_key", jiraKey).
 				Str("task_id", task.ID).
+				Str("task", task.Content).
 				Msg("linked jira issue not found, skipping")
 			continue
 		}
-		if err := e.syncLinkedPair(ctx, task, issue, project.ID, secMap); err != nil {
+		if err := e.syncLinkedPair(ctx, task, issue, project.ID, secMap, &summary); err != nil {
 			e.logger.Error().Err(err).
 				Str("task_id", task.ID).
 				Str("issue_key", issue.Key).
+				Str("issue", issue.Fields.Summary).
 				Msg("failed to sync linked pair")
+			summary.errors = append(
+				summary.errors,
+				syncAction{jiraKey: issue.Key, summary: "sync: " + issue.Fields.Summary},
+			)
 		}
 	}
 
-	e.logger.Info().Msg("sync cycle complete")
+	elapsed := time.Since(start)
+	e.logger.Info().
+		Str("duration", elapsed.String()).
+		Msg("sync complete")
+
+	summary.print(elapsed)
 	return nil
 }
 
@@ -156,7 +301,11 @@ func (e *Engine) createJiraFromTodoist(
 	ctx context.Context,
 	task *todoist.Task,
 	secMap sectionMap,
+	s *syncSummary,
 ) error {
+	if !slices.Contains(task.Labels, linkLabel) {
+		return nil
+	}
 	sectionName := secMap.byID[task.SectionID]
 	jiraStatus := e.cfg.JiraStatusForSection(sectionName)
 
@@ -164,22 +313,25 @@ func (e *Engine) createJiraFromTodoist(
 		Fields: &jiraCloud.IssueFields{
 			Project:     jiraCloud.Project{Key: e.cfg.JiraProject},
 			Summary:     task.Content,
-			Description: task.Description,
+			Description: md.ToJiraMD(task.Description),
 			Type:        jiraCloud.IssueType{Name: defaultIssueType},
 		},
 	})
 	if err != nil {
 		return fmt.Errorf("create jira issue: %w", err)
 	}
+	s.createdJira = append(s.createdJira, syncAction{jiraKey: created.Key, summary: task.Content})
 	e.logger.Info().
+		Str("task_id", task.ID).
 		Str("task", task.Content).
 		Str("issue_key", created.Key).
 		Msg("created jira issue from todoist task")
 
 	linkedContent := PrependJiraLink(task.Content, created.Key, e.cfg.JiraURL)
-	if _, err := e.todoist.UpdateTask(ctx, task.ID, todoist.UpdateTaskRequest{
+	_, err = e.todoist.UpdateTask(ctx, task.ID, todoist.UpdateTaskRequest{
 		Content: &linkedContent,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("update todoist task content with jira link: %w", err)
 	}
 
@@ -188,6 +340,7 @@ func (e *Engine) createJiraFromTodoist(
 			e.logger.Warn().Err(err).
 				Str("issue_key", created.Key).
 				Str("target_status", jiraStatus).
+				Str("issue", created.Fields.Summary).
 				Msg("failed to transition new issue")
 		}
 	}
@@ -200,6 +353,7 @@ func (e *Engine) createTodoistFromJira(
 	issue *jiraCloud.Issue,
 	projectID string,
 	secMap sectionMap,
+	s *syncSummary,
 ) error {
 	statusName := ""
 	if issue.Fields.Status != nil {
@@ -221,7 +375,7 @@ func (e *Engine) createTodoistFromJira(
 	linkedContent := PrependJiraLink(issue.Fields.Summary, issue.Key, e.cfg.JiraURL)
 	createReq := todoist.CreateTaskRequest{
 		Content:     linkedContent,
-		Description: issue.Fields.Description,
+		Description: md.FromJiraMD(issue.Fields.Description),
 		ProjectID:   projectID,
 		SectionID:   sectionID,
 		Labels:      []string{linkLabel},
@@ -235,13 +389,20 @@ func (e *Engine) createTodoistFromJira(
 	if err != nil {
 		return fmt.Errorf("create todoist task: %w", err)
 	}
+	s.createdTodoist = append(s.createdTodoist, syncAction{jiraKey: issue.Key, summary: issue.Fields.Summary})
 	e.logger.Info().
 		Str("issue_key", issue.Key).
 		Str("task_id", task.ID).
+		Str("task", task.Content).
+		Str("issue", issue.Fields.Summary).
 		Msg("created todoist task from jira issue")
 
 	if err := e.syncCommentsToTodoist(ctx, issue, task.ID); err != nil {
 		e.logger.Warn().Err(err).
+			Str("task_id", task.ID).
+			Str("task", task.Content).
+			Str("issue_key", issue.Key).
+			Str("issue", issue.Fields.Summary).
 			Msg("failed to sync comments to new todoist task")
 	}
 
@@ -254,7 +415,17 @@ func (e *Engine) syncLinkedPair(
 	issue *jiraCloud.Issue,
 	projectID string,
 	secMap sectionMap,
+	s *syncSummary,
 ) error {
+	if issue.Fields.Resolution != nil {
+		e.logger.Info().
+			Str("task_id", task.ID).
+			Str("issue_key", issue.Key).
+			Msg("jira issue resolved, closing todoist task")
+		s.completedTodoist = append(s.completedTodoist, syncAction{jiraKey: issue.Key, summary: issue.Fields.Summary})
+		return e.todoist.CloseTask(ctx, task.ID)
+	}
+
 	jiraUpdated := time.Time(issue.Fields.Updated)
 
 	todoistUpdated, err := time.Parse(time.RFC3339Nano, task.UpdatedAt)
@@ -262,6 +433,7 @@ func (e *Engine) syncLinkedPair(
 		e.logger.Warn().Err(err).
 			Str("task_id", task.ID).
 			Msg("could not parse todoist updated_at, assuming todoist is newer")
+		s.updatedToJira = append(s.updatedToJira, syncAction{jiraKey: issue.Key, summary: issue.Fields.Summary})
 		return e.pushTodoistToJira(ctx, task, issue, secMap)
 	}
 
@@ -270,6 +442,7 @@ func (e *Engine) syncLinkedPair(
 			Str("task_id", task.ID).
 			Str("issue_key", issue.Key).
 			Msg("jira is newer, syncing jira -> todoist")
+		s.updatedToTodoist = append(s.updatedToTodoist, syncAction{jiraKey: issue.Key, summary: issue.Fields.Summary})
 		return e.pushJiraToTodoist(ctx, task, issue, projectID, secMap)
 	}
 
@@ -277,6 +450,7 @@ func (e *Engine) syncLinkedPair(
 		Str("task_id", task.ID).
 		Str("issue_key", issue.Key).
 		Msg("todoist is newer (or same), syncing todoist -> jira")
+	s.updatedToJira = append(s.updatedToJira, syncAction{jiraKey: issue.Key, summary: issue.Fields.Summary})
 	return e.pushTodoistToJira(ctx, task, issue, secMap)
 }
 
@@ -288,7 +462,7 @@ func (e *Engine) pushJiraToTodoist(
 	secMap sectionMap,
 ) error {
 	linkedContent := PrependJiraLink(issue.Fields.Summary, issue.Key, e.cfg.JiraURL)
-	desc := issue.Fields.Description
+	desc := md.FromJiraMD(issue.Fields.Description)
 
 	updateReq := todoist.UpdateTaskRequest{
 		Content:     &linkedContent,
@@ -326,6 +500,10 @@ func (e *Engine) pushJiraToTodoist(
 
 	if err := e.syncCommentsToTodoist(ctx, issue, task.ID); err != nil {
 		e.logger.Warn().Err(err).
+			Str("task_id", task.ID).
+			Str("task", task.Content).
+			Str("issue_key", issue.Key).
+			Str("issue", issue.Fields.Summary).
 			Msg("failed to sync comments jira -> todoist")
 	}
 
@@ -344,7 +522,7 @@ func (e *Engine) pushTodoistToJira(
 		Key: issue.Key,
 		Fields: &jiraCloud.IssueFields{
 			Summary:     summary,
-			Description: task.Description,
+			Description: md.ToJiraMD(task.Description),
 		},
 	}
 	if task.Due != nil && task.Due.Date != "" {
@@ -370,51 +548,10 @@ func (e *Engine) pushTodoistToJira(
 				e.logger.Warn().Err(err).
 					Str("issue_key", issue.Key).
 					Str("target", targetJiraStatus).
+					Str("issue_key", issue.Key).
+					Str("issue", issue.Fields.Summary).
 					Msg("failed to transition jira issue")
 			}
-		}
-	}
-
-	if err := e.syncCommentsToJira(ctx, task.ID, issue); err != nil {
-		e.logger.Warn().Err(err).
-			Msg("failed to sync comments todoist -> jira")
-	}
-
-	return nil
-}
-
-// syncCommentsToJira syncs comments from a Todoist task to a Jira issue.
-// It uses the issue's embedded Comments field to avoid a separate API call.
-func (e *Engine) syncCommentsToJira(
-	ctx context.Context,
-	todoistTaskID string,
-	issue *jiraCloud.Issue,
-) error {
-	todoistComments, err := e.todoist.GetComments(ctx, todoistTaskID)
-	if err != nil {
-		return fmt.Errorf("get todoist comments: %w", err)
-	}
-
-	existingBodies := make(map[string]bool)
-	if issue.Fields.Comments != nil {
-		for _, c := range issue.Fields.Comments.Comments {
-			existingBodies[c.Body] = true
-		}
-	}
-
-	for _, tc := range todoistComments {
-		if strings.HasPrefix(tc.Content, commentFromJira) {
-			continue
-		}
-		syncedBody := commentFromTodoist + tc.Content
-		if existingBodies[syncedBody] {
-			continue
-		}
-		comment := &jiraCloud.Comment{Body: syncedBody}
-		if _, _, err := e.jira.Issue.AddComment(ctx, issue.Key, comment); err != nil {
-			e.logger.Warn().Err(err).
-				Str("issue_key", issue.Key).
-				Msg("failed to add comment to jira")
 		}
 	}
 
@@ -428,37 +565,62 @@ func (e *Engine) syncCommentsToTodoist(
 	issue *jiraCloud.Issue,
 	todoistTaskID string,
 ) error {
+	if issue.Fields.Comments == nil {
+		return nil
+	}
+
 	todoistComments, err := e.todoist.GetComments(ctx, todoistTaskID)
 	if err != nil {
 		return fmt.Errorf("get todoist comments: %w", err)
 	}
 
-	existingContents := make(map[string]bool)
+	existingComments := make([]string, 0, len(todoistComments))
 	for _, c := range todoistComments {
-		existingContents[c.Content] = true
+		existingComments = append(existingComments, c.Content)
 	}
 
-	if issue.Fields.Comments != nil {
-		for _, jc := range issue.Fields.Comments.Comments {
-			if strings.HasPrefix(jc.Body, commentFromTodoist) {
-				continue
-			}
-			syncedContent := commentFromJira + jc.Body
-			if existingContents[syncedContent] {
-				continue
-			}
-			if _, err := e.todoist.CreateComment(ctx, todoist.CreateCommentRequest{
-				TaskID:  todoistTaskID,
-				Content: syncedContent,
-			}); err != nil {
-				e.logger.Warn().Err(err).
-					Str("task_id", todoistTaskID).
-					Msg("failed to add comment to todoist")
-			}
+	for _, jc := range issue.Fields.Comments.Comments {
+		syncedContent := fmt.Sprintf(commentFromJiraPrefix, jc.Author.Name) + md.FromJiraMD(jc.Body)
+		if slices.Contains(existingComments, syncedContent) {
+			continue
+		}
+		_, err := e.todoist.CreateComment(ctx, todoist.CreateCommentRequest{
+			TaskID:  todoistTaskID,
+			Content: syncedContent,
+		})
+		if err != nil {
+			e.logger.Error().Err(err).
+				Str("task_id", todoistTaskID).
+				Msg("failed to add comment to todoist")
 		}
 	}
 
 	return nil
+}
+
+// resolveJiraIssue transitions a Jira issue to "Done". Called when a
+// linked Todoist task was recently completed.
+func (e *Engine) resolveJiraIssue(ctx context.Context, issue *jiraCloud.Issue, s *syncSummary) {
+	if issue.Fields.Resolution != nil {
+		e.logger.Debug().
+			Str("issue_key", issue.Key).
+			Msg("jira issue already resolved, skipping")
+		return
+	}
+
+	e.logger.Info().
+		Str("issue_key", issue.Key).
+		Str("summary", issue.Fields.Summary).
+		Msg("todoist task completed, resolving jira issue")
+
+	if _, err := e.jira.Issue.DoTransition(ctx, issue.Key, "Done"); err != nil {
+		e.logger.Error().Err(err).
+			Str("issue_key", issue.Key).
+			Msg("failed to transition jira issue to Done")
+		s.errors = append(s.errors, syncAction{jiraKey: issue.Key, summary: "resolve: " + issue.Fields.Summary})
+		return
+	}
+	s.resolvedJira = append(s.resolvedJira, syncAction{jiraKey: issue.Key, summary: issue.Fields.Summary})
 }
 
 func buildSectionMap(sections []todoist.Section) sectionMap {

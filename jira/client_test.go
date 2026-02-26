@@ -9,16 +9,10 @@ import (
 
 	"github.com/andygrunwald/go-jira/v2/cloud"
 	"github.com/google/uuid"
-	"github.com/joho/godotenv"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestMain(m *testing.M) {
-	_ = godotenv.Load("../.env")
-	os.Exit(m.Run())
-}
 
 func e2eSetup(t *testing.T) (*Client, string) {
 	t.Helper()

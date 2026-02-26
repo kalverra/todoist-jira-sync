@@ -40,7 +40,7 @@ func NewClient(token string, logger zerolog.Logger) *Client {
 					}
 				}).
 				Int("status", resp.StatusCode()).
-				Dur("elapsed", resp.Duration()).
+				Str("elapsed", resp.Duration().String()).
 				Str("resp_body", resp.String()).
 				Msg("http round trip")
 			if resp.IsError() {
@@ -161,6 +161,38 @@ func (c *Client) GetTasks(
 			return nil, err
 		}
 		all = append(all, page.Results...)
+		if page.NextCursor == nil || *page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	return all, nil
+}
+
+// GetCompletedTasks returns tasks completed between since and until for the
+// given project. It exhausts pagination so the caller gets the full set.
+func (c *Client) GetCompletedTasks(
+	ctx context.Context,
+	projectID string,
+	since, until string,
+) ([]Task, error) {
+	var all []Task
+	var cursor *string
+	for {
+		var page completedResponse
+		req := c.http.R().
+			SetContext(ctx).
+			SetQueryParam("project_id", projectID).
+			SetQueryParam("since", since).
+			SetQueryParam("until", until).
+			SetResult(&page)
+		if cursor != nil {
+			req.SetQueryParam("cursor", *cursor)
+		}
+		if _, err := req.Get("/tasks/completed/by_completion_date"); err != nil {
+			return nil, err
+		}
+		all = append(all, page.Items...)
 		if page.NextCursor == nil || *page.NextCursor == "" {
 			break
 		}

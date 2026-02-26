@@ -9,33 +9,39 @@ type paginatedResponse[T any] struct {
 	NextCursor *string `json:"next_cursor"`
 }
 
+// completedResponse wraps the completed tasks endpoints which use "items" instead of "results".
+type completedResponse struct {
+	Items      []Task  `json:"items"`
+	NextCursor *string `json:"next_cursor"`
+}
+
 // Task represents a Todoist task from API v1.
 type Task struct {
-	ID             string            `json:"id"`
-	UserID         string            `json:"user_id"`
-	ProjectID      string            `json:"project_id"`
-	SectionID      string            `json:"section_id"`
-	ParentID       string            `json:"parent_id"`
-	Content        string            `json:"content"`
-	Description    string            `json:"description"`
-	Checked        bool              `json:"checked"`
-	IsDeleted      bool              `json:"is_deleted"`
-	Labels         []string          `json:"labels"`
-	ChildOrder     int               `json:"child_order"`
-	Priority       int               `json:"priority"`
-	Due            *Due              `json:"due"`
-	Deadline       map[string]string `json:"deadline"`
-	Duration       map[string]int    `json:"duration"`
-	AddedByUID     string            `json:"added_by_uid"`
-	AssignedByUID  string            `json:"assigned_by_uid"`
-	ResponsibleUID string            `json:"responsible_uid"`
-	NoteCount      int               `json:"note_count"`
-	DayOrder       int               `json:"day_order"`
-	IsCollapsed    bool              `json:"is_collapsed"`
-	AddedAt        string            `json:"added_at"`
-	UpdatedAt      string            `json:"updated_at"`
-	CompletedAt    string            `json:"completed_at"`
-	CompletedByUID string            `json:"completed_by_uid"`
+	ID             string    `json:"id"`
+	UserID         string    `json:"user_id"`
+	ProjectID      string    `json:"project_id"`
+	SectionID      string    `json:"section_id"`
+	ParentID       string    `json:"parent_id"`
+	Content        string    `json:"content"`
+	Description    string    `json:"description"`
+	Checked        bool      `json:"checked"`
+	IsDeleted      bool      `json:"is_deleted"`
+	Labels         []string  `json:"labels"`
+	ChildOrder     int       `json:"child_order"`
+	Priority       int       `json:"priority"`
+	Due            *Due      `json:"due"`
+	Deadline       *Deadline `json:"deadline"`
+	Duration       *Duration `json:"duration"`
+	AddedByUID     string    `json:"added_by_uid"`
+	AssignedByUID  string    `json:"assigned_by_uid"`
+	ResponsibleUID string    `json:"responsible_uid"`
+	NoteCount      int       `json:"note_count"`
+	DayOrder       int       `json:"day_order"`
+	IsCollapsed    bool      `json:"is_collapsed"`
+	AddedAt        string    `json:"added_at"`
+	UpdatedAt      string    `json:"updated_at"`
+	CompletedAt    string    `json:"completed_at"`
+	CompletedByUID string    `json:"completed_by_uid"`
 }
 
 // Due represents a task's due date.
@@ -46,6 +52,19 @@ type Due struct {
 	Datetime    string `json:"datetime,omitempty"`
 	Timezone    string `json:"timezone,omitempty"`
 	Lang        string `json:"lang,omitempty"`
+}
+
+// Duration represents a task's duration.
+type Duration struct {
+	Amount int    `json:"amount"`
+	Unit   string `json:"unit"`
+}
+
+// Deadline represents a task's deadline.
+type Deadline struct {
+	Date     string `json:"date"`
+	Timezone string `json:"timezone,omitempty"`
+	Lang     string `json:"lang"`
 }
 
 // Section represents a Todoist section.

@@ -31,7 +31,7 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	ev := t.logger.Trace().
 		Str("method", req.Method).
 		Str("url", req.URL.String()).
-		Dur("elapsed", elapsed)
+		Str("elapsed", elapsed.String())
 	if len(reqBody) > 0 {
 		ev.RawJSON("req_body", reqBody)
 	}
@@ -47,6 +47,10 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 			ev.Err(err).Msg("failed to close response body")
 		}
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
+		if len(respBody) > 1000 {
+			respBody = respBody[:1000]
+			respBody = append(respBody, []byte("...[truncated]")...)
+		}
 		ev.Str("resp_body", string(respBody))
 	}
 	ev.Msg("http round trip")
