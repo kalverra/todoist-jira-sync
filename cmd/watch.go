@@ -17,9 +17,7 @@ var watchCmd = &cobra.Command{
 	Short: "Continuously sync Todoist and Jira on a polling interval",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		todoistClient := todoist.NewClient(cfg.TodoistToken, logger)
-		jiraClient, err := jira.NewClient(
-			cfg.JiraURL, cfg.JiraEmail, cfg.JiraToken, logger,
-		)
+		jiraClient, err := jira.NewClient(cfg, logger)
 		if err != nil {
 			return err
 		}

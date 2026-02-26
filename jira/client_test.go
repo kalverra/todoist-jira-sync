@@ -7,11 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andygrunwald/go-jira/v2/cloud"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/kalverra/todoist-jira-sync/config"
 )
 
 func e2eSetup(t *testing.T) (*Client, string) {
@@ -28,13 +29,11 @@ func e2eSetup(t *testing.T) (*Client, string) {
 		)
 	}
 
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
 	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger()
-	client, err := NewClient(
-		os.Getenv("JIRA_URL"),
-		os.Getenv("JIRA_EMAIL"),
-		os.Getenv("JIRA_API_TOKEN"),
-		logger,
-	)
+	client, err := NewClient(cfg, logger)
 	require.NoError(t, err)
 	return client, os.Getenv("JIRA_PROJECT")
 }
@@ -43,31 +42,27 @@ func testID() string {
 	return uuid.New().String()[:8]
 }
 
-func createTestIssue(
-	t *testing.T,
-	client *Client,
-	project string,
-) *cloud.Issue {
+func createTestIssue(t *testing.T, client *Client, project string) *Issue {
 	t.Helper()
 	ctx := context.Background()
 
 	summary := fmt.Sprintf("e2e-test-%s", testID())
-	created, _, err := client.Issue.Create(ctx, &cloud.Issue{
-		Fields: &cloud.IssueFields{
-			Project:     cloud.Project{Key: project},
+	created, err := client.CreateIssue(ctx, &Issue{
+		Fields: &IssueFields{
+			Project:     Project{Key: project},
 			Summary:     summary,
-			Description: "e2e test issue",
-			Type:        cloud.IssueType{Name: "Story"},
-			Duedate:     cloud.Date(time.Now()),
+			Description: TextToADF("e2e test issue"),
+			IssueType:   IssueType{Name: "Story"},
+			Duedate:     time.Now().Format("2006-01-02"),
 		},
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, err := client.Issue.Delete(context.Background(), created.Key)
+		err := client.DeleteIssue(context.Background(), created.Key)
 		require.NoError(t, err)
 	})
 
-	issue, _, err := client.Issue.Get(ctx, created.Key, nil)
+	issue, err := client.GetIssue(ctx, created.Key, nil)
 	require.NoError(t, err)
 	return issue
 }
@@ -78,22 +73,25 @@ func TestJiraIssueCRUD(t *testing.T) { //nolint:paralleltest
 
 	issue := createTestIssue(t, client, project)
 	assert.NotEmpty(t, issue.Key)
-	assert.Equal(t, "e2e test issue", issue.Fields.Description)
-	assert.Equal(t, time.Now(), issue.Fields.Duedate)
+	assert.Equal(t, "e2e test issue", ADFToText(issue.Fields.Description))
+	assert.Equal(t, time.Now().Format("2006-01-02"), issue.Fields.Duedate)
 
 	newSummary := fmt.Sprintf("e2e-test-updated-%s", testID())
 	newDesc := "updated description"
-	newDue := cloud.Date(time.Now().AddDate(0, 0, 1))
-	issue.Fields.Summary = newSummary
-	issue.Fields.Description = newDesc
-	issue.Fields.Duedate = cloud.Date(time.Now())
+	newDue := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
 
-	_, _, err := client.Issue.Update(ctx, issue, nil)
+	err := client.UpdateIssue(ctx, issue.Key, &Issue{
+		Fields: &IssueFields{
+			Summary:     newSummary,
+			Description: TextToADF(newDesc),
+			Duedate:     newDue,
+		},
+	})
 	require.NoError(t, err)
 
-	fetched, _, err := client.Issue.Get(ctx, issue.Key, nil)
+	fetched, err := client.GetIssue(ctx, issue.Key, nil)
 	require.NoError(t, err)
 	assert.Equal(t, newSummary, fetched.Fields.Summary)
-	assert.Equal(t, newDesc, fetched.Fields.Description)
+	assert.Equal(t, newDesc, ADFToText(fetched.Fields.Description))
 	assert.Equal(t, newDue, fetched.Fields.Duedate)
 }

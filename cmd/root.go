@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"time"
 
@@ -34,18 +35,28 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 
+		logFilePath := "todoist-jira-sync.log.jsonl"
+		err = os.WriteFile(logFilePath, []byte{}, 0600)
+		if err != nil {
+			return fmt.Errorf("create log file: %w", err)
+		}
+		logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err != nil {
+			return fmt.Errorf("open log file: %w", err)
+		}
+
+		multiWriter := zerolog.MultiLevelWriter(zerolog.ConsoleWriter{
+			Out:        os.Stderr,
+			TimeFormat: time.RFC3339,
+		}, logFile)
 		lvl, err := zerolog.ParseLevel(cfg.LogLevel)
 		if err != nil {
 			lvl = zerolog.InfoLevel
 			cfg.LogLevel = "info"
+			logger.Warn().Err(err).Msg("invalid log level, setting to info")
 		}
 		zerolog.SetGlobalLevel(lvl)
-		logger = zerolog.New(
-			zerolog.ConsoleWriter{
-				Out:        os.Stderr,
-				TimeFormat: time.RFC3339,
-			},
-		).Level(lvl).With().Timestamp().Logger()
+		logger = zerolog.New(multiWriter).Level(lvl).With().Timestamp().Logger()
 
 		logger.Info().
 			Str("todoist_project", cfg.TodoistProject).

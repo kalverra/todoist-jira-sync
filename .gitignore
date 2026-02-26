@@ -2,6 +2,9 @@ out/
 .vscode/
 .DS_Store
 .env
+*.log.json
+*.log.jsonl
+*.log
 
 # Temp files
 x.*

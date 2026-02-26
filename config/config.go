@@ -37,7 +37,9 @@ const (
 
 var (
 	// DefaultStatusMap maps Todoist statuses to Jira statuses.
-	DefaultStatusMap = map[string]string{ // todoist status -> jira status
+	DefaultStatusMap = map[string]string{ // jira status -> todoist status
+		"Open":        "To Do",
+		"Descheduled": "To Do",
 		"To Do":       "To Do",
 		"In Progress": "In Progress",
 		"In Review":   "In Review",
@@ -125,26 +127,22 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// JiraStatusForSection returns the Jira status name for a Todoist section.
-// It uses the status map to map the Todoist section name to the Jira status name.
-// If no mapping exists, the section name is returned as-is.
-func (c *Config) JiraStatusForSection(sectionName string) string {
+// JiraToTodoistStatus returns the Todoist status/section name for a Jira status.
+func (c *Config) JiraToTodoistStatus(sectionName string) string {
 	if status, ok := c.StatusMap[sectionName]; ok {
 		return status
 	}
 	return sectionName
 }
 
-// SectionForJiraStatus returns the Todoist section name for a Jira status.
-// It uses the status map to map the Jira status name to the Todoist section name.
-// If no mapping exists, the status name is returned as-is.
-func (c *Config) SectionForJiraStatus(jiraStatus string) string {
+// TodoistToJiraStatus returns the Jira status name for a Todoist status.
+func (c *Config) TodoistToJiraStatus(todoistStatus string) string {
 	for section, status := range c.StatusMap {
-		if status == jiraStatus {
+		if status == todoistStatus {
 			return section
 		}
 	}
-	return jiraStatus
+	return todoistStatus
 }
 
 // JiraIssueTypesJQL returns a JQL fragment for filtering by configured issue types.

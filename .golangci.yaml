@@ -49,6 +49,6 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/smartcontractkit/codeowners-attribution
+        - github.com/kalverra/todoist-jira-sync
     golines:
       max-len: 120
