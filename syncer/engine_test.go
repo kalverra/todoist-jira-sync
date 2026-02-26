@@ -134,10 +134,10 @@ func TestSyncJiraToTodoist(t *testing.T) { //nolint:paralleltest
 	summary := fmt.Sprintf("e2e-sync-j2t-%s", testID())
 	created, err := env.jiraClient.CreateIssue(ctx, &jira.Issue{
 		Fields: &jira.IssueFields{
-			Project:     jira.Project{Key: env.cfg.JiraProject},
+			Project:     &jira.Project{Key: env.cfg.JiraProject},
 			Summary:     summary,
 			Description: jira.TextToADF("jira to todoist test"),
-			IssueType:   jira.IssueType{Name: "Task"},
+			IssueType:   &jira.IssueType{Name: "Task"},
 		},
 	})
 	require.NoError(t, err)

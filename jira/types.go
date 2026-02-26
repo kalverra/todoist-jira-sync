@@ -31,8 +31,8 @@ type IssueFields struct {
 	Updated     string          `json:"updated,omitempty"`
 	Duedate     string          `json:"duedate,omitempty"`
 	Comment     *CommentPage    `json:"comment,omitempty"`
-	Project     Project         `json:"project"`
-	IssueType   IssueType       `json:"issuetype"`
+	Project     *Project        `json:"project,omitempty"`
+	IssueType   *IssueType      `json:"issuetype,omitempty"`
 	SprintRaw   json.RawMessage `json:"customfield_10020,omitempty"`
 }
 

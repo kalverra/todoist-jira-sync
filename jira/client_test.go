@@ -49,10 +49,10 @@ func createTestIssue(t *testing.T, client *Client, project string) *Issue {
 	summary := fmt.Sprintf("e2e-test-%s", testID())
 	created, err := client.CreateIssue(ctx, &Issue{
 		Fields: &IssueFields{
-			Project:     Project{Key: project},
+			Project:     &Project{Key: project},
 			Summary:     summary,
 			Description: TextToADF("e2e test issue"),
-			IssueType:   IssueType{Name: "Story"},
+			IssueType:   &IssueType{Name: "Story"},
 			Duedate:     time.Now().Format("2006-01-02"),
 		},
 	})

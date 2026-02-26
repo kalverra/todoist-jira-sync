@@ -43,7 +43,8 @@ var (
 		"To Do":       "To Do",
 		"In Progress": "In Progress",
 		"In Review":   "In Review",
-		"Done":        "Done",
+		"Done":        "Closed",
+		"Closed":      "Closed",
 		"Blocked":     "Blocked",
 	}
 	// DefaultJiraIssueTypes Jira issue types to sync.

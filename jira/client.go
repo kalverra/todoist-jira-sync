@@ -166,7 +166,7 @@ func (c *Client) DoTransition(ctx context.Context, issueKey, targetStatus string
 	payload := TransitionRequest{
 		Transition: TransitionID{ID: transitionID},
 	}
-	if strings.EqualFold(targetStatus, "Done") {
+	if strings.EqualFold(targetStatus, "Closed") {
 		payload.Fields = &TransitionFields{
 			Resolution: &Resolution{Name: "Done"},
 		}

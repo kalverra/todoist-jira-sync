@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	commentFromJiraPrefix = "[From Jira %s] " // %s is the Jira issue key
+	commentFromJiraPrefix = "`[From Jira %s]`" // %s is the Jira issue key
 	defaultIssueType      = "Story"
 	linkLabel             = "jira-sync"
 )
@@ -299,10 +299,10 @@ func (e *Engine) createJiraFromTodoist(
 
 	created, err := e.jira.CreateIssue(ctx, &jira.Issue{
 		Fields: &jira.IssueFields{
-			Project:     jira.Project{Key: e.cfg.JiraProject},
+			Project:     &jira.Project{Key: e.cfg.JiraProject},
 			Summary:     task.Content,
 			Description: jira.TextToADF(task.Description),
-			IssueType:   jira.IssueType{Name: defaultIssueType},
+			IssueType:   &jira.IssueType{Name: defaultIssueType},
 		},
 	})
 	if err != nil {
@@ -323,7 +323,7 @@ func (e *Engine) createJiraFromTodoist(
 		return fmt.Errorf("update todoist task content with jira link: %w", err)
 	}
 
-	if jiraStatus != "" && jiraStatus != "To Do" {
+	if jiraStatus != "" && !statusEquivalent(jiraStatus, "Open") {
 		if err := e.jira.DoTransition(ctx, created.Key, jiraStatus); err != nil {
 			e.logger.Warn().Err(err).
 				Str("issue_key", created.Key).
@@ -543,7 +543,7 @@ func (e *Engine) pushTodoistToJira(
 		if issue.Fields.Status != nil {
 			currentStatus = issue.Fields.Status.Name
 		}
-		if !strings.EqualFold(targetJiraStatus, currentStatus) {
+		if !statusEquivalent(targetJiraStatus, currentStatus) {
 			if err := e.jira.DoTransition(ctx, issue.Key, targetJiraStatus); err != nil {
 				e.logger.Warn().Err(err).
 					Str("issue_key", issue.Key).
@@ -612,10 +612,10 @@ func (e *Engine) resolveJiraIssue(ctx context.Context, issue *jira.Issue, s *syn
 		Str("summary", issue.Fields.Summary).
 		Msg("todoist task completed, resolving jira issue")
 
-	if err := e.jira.DoTransition(ctx, issue.Key, "Done"); err != nil {
+	if err := e.jira.DoTransition(ctx, issue.Key, "Closed"); err != nil {
 		e.logger.Error().Err(err).
 			Str("issue_key", issue.Key).
-			Msg("failed to transition jira issue to Done")
+			Msg("failed to transition jira issue to Closed")
 		s.errors = append(s.errors, syncAction{jiraKey: issue.Key, summary: "resolve: " + issue.Fields.Summary})
 		return
 	}
@@ -641,4 +641,30 @@ func findIssueByKey(issues []jira.Issue, key string) (*jira.Issue, bool) {
 		}
 	}
 	return nil, false
+}
+
+// statusEquivalent returns true if two Jira statuses are functionally the same.
+var equivalentStatuses = [][]string{
+	{"To Do", "Open"},
+}
+
+func statusEquivalent(a, b string) bool {
+	if strings.EqualFold(a, b) {
+		return true
+	}
+	for _, group := range equivalentStatuses {
+		aIn, bIn := false, false
+		for _, s := range group {
+			if strings.EqualFold(a, s) {
+				aIn = true
+			}
+			if strings.EqualFold(b, s) {
+				bIn = true
+			}
+		}
+		if aIn && bIn {
+			return true
+		}
+	}
+	return false
 }
