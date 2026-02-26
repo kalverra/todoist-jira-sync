@@ -21,6 +21,7 @@ type Config struct {
 	JiraIssueTypes []string          `mapstructure:"jira_issue_types"` // issue type names to sync (e.g. Story, Task, Bug); set via flag/env or default
 	Interval       time.Duration     `mapstructure:"interval"`
 	LogLevel       string            `mapstructure:"log_level"`
+	LogFilePath    string            `mapstructure:"log_file_path"`
 	StatusMap      map[string]string `mapstructure:"status_map"`
 }
 
@@ -33,6 +34,8 @@ const (
 	DefaultInterval = 5 * time.Minute
 	// DefaultLogLevel log level.
 	DefaultLogLevel = "info"
+	// DefaultLogFilePath log file path.
+	DefaultLogFilePath = "./todoist-jira-sync.log.jsonl"
 )
 
 var (
@@ -74,6 +77,7 @@ func Load(opts ...LoadOption) (*Config, error) {
 	v.SetDefault("interval", DefaultInterval)
 	v.SetDefault("log_level", DefaultLogLevel)
 	v.SetDefault("status_map", DefaultStatusMap)
+	v.SetDefault("log_file_path", DefaultLogFilePath)
 
 	v.SetConfigName(".env")
 	v.SetConfigType("env")

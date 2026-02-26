@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/charmbracelet/fang"
@@ -35,11 +36,12 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 
-		logFilePath := "todoist-jira-sync.log.jsonl"
-		err = os.WriteFile(logFilePath, []byte{}, 0600)
+		home, err := os.UserHomeDir()
 		if err != nil {
-			return fmt.Errorf("create log file: %w", err)
+			return fmt.Errorf("get home dir: %w", err)
 		}
+		logFilePath := filepath.Join(home, "Library", "Logs", "todoist-jira-sync.log.jsonl")
+		//nolint:gosec // Log file is fine
 		logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 		if err != nil {
 			return fmt.Errorf("open log file: %w", err)
@@ -66,6 +68,7 @@ var rootCmd = &cobra.Command{
 			Strs("jira_issue_types", cfg.JiraIssueTypes).
 			Str("interval", cfg.Interval.String()).
 			Str("log_level", cfg.LogLevel).
+			Str("log_file_path", cfg.LogFilePath).
 			Msg("config")
 
 		return nil
@@ -87,6 +90,7 @@ func init() {
 	)
 	flags.Duration("interval", config.DefaultInterval, "Polling interval for watch mode (env: SYNC_INTERVAL)")
 	flags.String("log-level", config.DefaultLogLevel, "Log level: trace, debug, info, warn, error (env: LOG_LEVEL)")
+	flags.String("log-file-path", config.DefaultLogFilePath, "Log file path (env: LOG_FILE_PATH)")
 }
 
 // Execute runs the root command.
