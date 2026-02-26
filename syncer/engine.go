@@ -377,8 +377,18 @@ func (e *Engine) createTodoistFromJira(
 		Labels:      []string{linkLabel},
 		Priority:    jira.TodoistPriority(priorityID),
 	}
-	if issue.Fields.Duedate != "" {
-		createReq.DueDate = issue.Fields.Duedate
+	if sprintEnd := jira.SprintEndDate(issue); sprintEnd != "" {
+		sprintEndTime, err := time.Parse(time.RFC3339, sprintEnd)
+		if err != nil {
+			return fmt.Errorf("parse sprint end date: %w", err)
+		}
+		createReq.DeadlineDate = &sprintEndTime
+	} else if issue.Fields.Duedate != "" {
+		dueDate, err := time.Parse(time.RFC3339, issue.Fields.Duedate)
+		if err != nil {
+			return fmt.Errorf("parse due date: %w", err)
+		}
+		createReq.DeadlineDate = &dueDate
 	}
 
 	task, err := e.todoist.CreateTask(ctx, createReq)
@@ -474,8 +484,18 @@ func (e *Engine) pushJiraToTodoist(
 		Content:     &linkedContent,
 		Description: &desc,
 	}
-	if issue.Fields.Duedate != "" {
-		updateReq.DueDate = &issue.Fields.Duedate
+	if sprintEnd := jira.SprintEndDate(issue); sprintEnd != "" {
+		sprintEndTime, err := time.Parse(time.RFC3339, sprintEnd)
+		if err != nil {
+			return fmt.Errorf("parse sprint end date: %w", err)
+		}
+		updateReq.DeadlineDate = &sprintEndTime
+	} else if issue.Fields.Duedate != "" {
+		dueDate, err := time.Parse(time.RFC3339, issue.Fields.Duedate)
+		if err != nil {
+			return fmt.Errorf("parse due date: %w", err)
+		}
+		updateReq.DueDate = &dueDate
 	}
 
 	if _, err := e.todoist.UpdateTask(ctx, task.ID, updateReq); err != nil {
@@ -520,13 +540,8 @@ func (e *Engine) pushTodoistToJira(
 	issue *jira.Issue,
 	secMap sectionMap,
 ) error {
-	summary := StripJiraPrefix(task.Content)
-
 	updateIssue := &jira.Issue{
-		Fields: &jira.IssueFields{
-			Summary:     summary,
-			Description: jira.TextToADF(task.Description),
-		},
+		Fields: &jira.IssueFields{},
 	}
 	if task.Due != nil && task.Due.Date != "" {
 		updateIssue.Fields.Duedate = task.Due.Date

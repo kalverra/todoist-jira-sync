@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -51,13 +52,13 @@ func testID() string {
 func TestTodoistTaskCRUD(t *testing.T) { //nolint:paralleltest
 	client, projectID := e2eSetup(t)
 	ctx := context.Background()
-
+	dueDate := time.Now()
 	taskName := fmt.Sprintf("e2e-test-crud-%s", testID())
 	task, err := client.CreateTask(ctx, CreateTaskRequest{
 		Content:     taskName,
 		Description: "initial description",
 		ProjectID:   projectID,
-		DueDate:     "2026-12-31",
+		DueDate:     &dueDate,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -81,11 +82,11 @@ func TestTodoistTaskCRUD(t *testing.T) { //nolint:paralleltest
 
 	newContent := fmt.Sprintf("e2e-test-updated-%s", testID())
 	newDesc := "updated description"
-	newDue := "2027-06-15"
+	newDue := time.Now()
 	updated, err := client.UpdateTask(ctx, task.ID, UpdateTaskRequest{
-		Content:     &newContent,
-		Description: &newDesc,
-		DueDate:     &newDue,
+		Content:      &newContent,
+		Description:  &newDesc,
+		DeadlineDate: &newDue,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, newContent, updated.Content)

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog"
 	"resty.dev/v3"
@@ -196,23 +197,40 @@ func (c *Client) AddComment(ctx context.Context, issueKey string, body json.RawM
 	return &result, nil
 }
 
-// InCurrentSprint checks if the issue is in an active sprint by inspecting
-// the SprintRaw (customfield_10020) field.
-func InCurrentSprint(issue *Issue) bool {
+// ActiveSprint returns the active sprint for an issue, or nil if none.
+func ActiveSprint(issue *Issue) *SprintInfo {
 	if issue.Fields == nil || len(issue.Fields.SprintRaw) == 0 || string(issue.Fields.SprintRaw) == "null" {
-		return false
+		return nil
 	}
 
-	var sprints []map[string]any
+	var sprints []SprintInfo
 	if err := json.Unmarshal(issue.Fields.SprintRaw, &sprints); err != nil {
-		return false
+		return nil
 	}
-	for _, s := range sprints {
-		if s["state"] == "active" {
-			return true
+	for i := range sprints {
+		if sprints[i].State == "active" {
+			return &sprints[i]
 		}
 	}
-	return false
+	return nil
+}
+
+// InCurrentSprint checks if the issue is in an active sprint.
+func InCurrentSprint(issue *Issue) bool {
+	return ActiveSprint(issue) != nil
+}
+
+// SprintEndDate returns the active sprint's end date as "YYYY-MM-DD", or empty string if unavailable.
+func SprintEndDate(issue *Issue) string {
+	sprint := ActiveSprint(issue)
+	if sprint == nil || sprint.EndDate == "" {
+		return ""
+	}
+	t, err := time.Parse(time.RFC3339, sprint.EndDate)
+	if err != nil {
+		return ""
+	}
+	return t.Format("2006-01-02")
 }
 
 // TodoistPriority converts a Jira priority ID to a Todoist priority level.

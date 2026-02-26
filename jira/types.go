@@ -123,3 +123,12 @@ type TransitionID struct {
 type TransitionFields struct {
 	Resolution *Resolution `json:"resolution,omitempty"`
 }
+
+// SprintInfo represents a sprint entry from customfield_10020.
+type SprintInfo struct {
+	ID        int    `json:"id"`
+	Name      string `json:"name"`
+	State     string `json:"state"`
+	StartDate string `json:"startDate,omitempty"`
+	EndDate   string `json:"endDate,omitempty"`
+}
