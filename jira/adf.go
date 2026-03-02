@@ -18,12 +18,12 @@ type adfNode struct {
 	Text    string    `json:"text,omitempty"`
 	Content []adfNode `json:"content,omitempty"`
 	Marks   []adfMark `json:"marks,omitempty"`
-	Attrs   adfAttrs  `json:"attrs"`
+	Attrs   *adfAttrs `json:"attrs,omitempty"`
 }
 
 type adfMark struct {
-	Type  string   `json:"type"`
-	Attrs adfAttrs `json:"attrs"`
+	Type  string    `json:"type"`
+	Attrs *adfAttrs `json:"attrs,omitempty"`
 }
 
 type adfAttrs struct {
@@ -80,7 +80,7 @@ func extractText(node adfNode) string {
 		return node.Text
 	}
 	if node.Type == "inlineCard" {
-		if node.Attrs.URL != "" {
+		if node.Attrs != nil && node.Attrs.URL != "" {
 			return node.Attrs.URL
 		}
 		return ""
@@ -102,7 +102,7 @@ func extractText(node adfNode) string {
 
 func linkHref(marks []adfMark) string {
 	for _, m := range marks {
-		if m.Type == "link" && m.Attrs.Href != "" {
+		if m.Type == "link" && m.Attrs != nil && m.Attrs.Href != "" {
 			return m.Attrs.Href
 		}
 	}
