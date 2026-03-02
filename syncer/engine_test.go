@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -243,7 +244,7 @@ func TestSyncComments(t *testing.T) { //nolint:paralleltest
 	require.NoError(t, err)
 	foundJiraComment := false
 	for _, c := range todoistComments {
-		if c.Content == "[From Jira] "+jiraCommentText {
+		if strings.Contains(c.Content, jiraCommentText) && strings.Contains(c.Content, "jira-comment:") {
 			foundJiraComment = true
 			break
 		}

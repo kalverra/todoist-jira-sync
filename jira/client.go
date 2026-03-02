@@ -51,11 +51,11 @@ func NewClient(cfg *config.Config, logger zerolog.Logger) (*Client, error) {
 				}).
 				Int("status", resp.StatusCode()).
 				Str("elapsed", resp.Duration().String())
-			body := resp.String()
-			if len(body) > 2000 {
-				ev.Str("resp_body", body[:2000]+"...(truncated)")
+			body := resp.Bytes()
+			if json.Valid(body) {
+				ev.RawJSON("resp_body", []byte(body))
 			} else {
-				ev.Str("resp_body", body)
+				ev.Str("resp_body", string(body))
 			}
 			ev.Msg("http round trip")
 			if resp.IsError() {

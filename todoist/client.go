@@ -33,15 +33,23 @@ func NewClient(token string, logger zerolog.Logger) *Client {
 				Str("method", req.Method).
 				Str("url", req.RawRequest.URL.String()).
 				Func(func(e *zerolog.Event) {
-					if req.Body != nil {
-						if b, err := json.Marshal(req.Body); err == nil {
-							e.RawJSON("req_body", b)
-						}
+					reqBodyBytes, err := json.Marshal(req.Body)
+					if err != nil {
+						e.Str("req_body", fmt.Sprintf("%v", req.Body)).Msg("marshal req body")
+					}
+					if req.Body != nil && json.Valid(reqBodyBytes) {
+						e.RawJSON("req_body", reqBodyBytes)
 					}
 				}).
 				Int("status", resp.StatusCode()).
 				Str("elapsed", resp.Duration().String()).
-				Str("resp_body", resp.String()).
+				Func(func(e *zerolog.Event) {
+					if resp != nil && json.Valid(resp.Bytes()) {
+						e.RawJSON("resp_body", resp.Bytes())
+					} else {
+						e.Str("resp_body", string(resp.Bytes()))
+					}
+				}).
 				Msg("http round trip")
 			if resp.IsError() {
 				return fmt.Errorf(
@@ -332,4 +340,26 @@ func (c *Client) CreateComment(
 		return nil, err
 	}
 	return &comment, nil
+}
+
+// DeleteComment deletes a comment by ID.
+func (c *Client) DeleteComment(ctx context.Context, commentID string) error {
+	_, err := c.http.R().
+		SetContext(ctx).
+		Delete("/comments/" + commentID)
+	return err
+}
+
+// DeleteAllComments deletes every comment on a task.
+func (c *Client) DeleteAllComments(ctx context.Context, taskID string) (int, error) {
+	comments, err := c.GetComments(ctx, taskID)
+	if err != nil {
+		return 0, err
+	}
+	for _, comment := range comments {
+		if err := c.DeleteComment(ctx, comment.ID); err != nil {
+			return 0, fmt.Errorf("delete comment %s: %w", comment.ID, err)
+		}
+	}
+	return len(comments), nil
 }

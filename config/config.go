@@ -43,7 +43,7 @@ var (
 	DefaultStatusMap = map[string]string{ // jira status -> todoist status
 		"Open":        "To Do",
 		"Descheduled": "To Do",
-		"To Do":       "To Do",
+		"Scheduled":   "In Progress",
 		"In Progress": "In Progress",
 		"In Review":   "In Review",
 		"Done":        "Closed",

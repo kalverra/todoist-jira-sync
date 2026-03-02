@@ -16,7 +16,8 @@ import (
 )
 
 const (
-	commentFromJiraPrefix = "`[From Jira %s]`" // %s is the Jira issue key
+	commentFromJiraPrefix = "*[From Jira - %s] (jira-comment:%s)*"
+	jiraCommentMarker     = "(jira-comment:%s)"
 	defaultIssueType      = "Story"
 	linkLabel             = "jira-sync"
 )
@@ -378,13 +379,13 @@ func (e *Engine) createTodoistFromJira(
 		Priority:    jira.TodoistPriority(priorityID),
 	}
 	if sprintEnd := jira.SprintEndDate(issue); sprintEnd != "" {
-		sprintEndTime, err := time.Parse(time.RFC3339, sprintEnd)
+		sprintEndTime, err := time.Parse("2006-01-02", sprintEnd)
 		if err != nil {
 			return fmt.Errorf("parse sprint end date: %w", err)
 		}
 		createReq.DeadlineDate = &sprintEndTime
 	} else if issue.Fields.Duedate != "" {
-		dueDate, err := time.Parse(time.RFC3339, issue.Fields.Duedate)
+		dueDate, err := time.Parse("2006-01-02", issue.Fields.Duedate)
 		if err != nil {
 			return fmt.Errorf("parse due date: %w", err)
 		}
@@ -485,13 +486,13 @@ func (e *Engine) pushJiraToTodoist(
 		Description: &desc,
 	}
 	if sprintEnd := jira.SprintEndDate(issue); sprintEnd != "" {
-		sprintEndTime, err := time.Parse(time.RFC3339, sprintEnd)
+		sprintEndTime, err := time.Parse("2006-01-02", sprintEnd)
 		if err != nil {
 			return fmt.Errorf("parse sprint end date: %w", err)
 		}
 		updateReq.DeadlineDate = &sprintEndTime
 	} else if issue.Fields.Duedate != "" {
-		dueDate, err := time.Parse(time.RFC3339, issue.Fields.Duedate)
+		dueDate, err := time.Parse("2006-01-02", issue.Fields.Duedate)
 		if err != nil {
 			return fmt.Errorf("parse due date: %w", err)
 		}
@@ -562,9 +563,11 @@ func (e *Engine) pushTodoistToJira(
 			if err := e.jira.DoTransition(ctx, issue.Key, targetJiraStatus); err != nil {
 				e.logger.Warn().Err(err).
 					Str("issue_key", issue.Key).
-					Str("target", targetJiraStatus).
+					Str("current_jira_status", currentStatus).
+					Str("target_jira_status", targetJiraStatus).
+					Str("current_todoist_status", sectionName).
 					Str("issue", issue.Fields.Summary).
-					Msg("failed to transition jira issue")
+					Msg("failed to transition jira issue based on todoist status change")
 			}
 		}
 	}
@@ -586,20 +589,24 @@ func (e *Engine) syncCommentsToTodoist(
 		return fmt.Errorf("get todoist comments: %w", err)
 	}
 
-	existingComments := make([]string, 0, len(todoistComments))
-	for _, c := range todoistComments {
-		existingComments = append(existingComments, c.Content)
-	}
-
 	for _, jc := range issue.Fields.Comment.Comments {
+		marker := fmt.Sprintf(jiraCommentMarker, jc.ID)
+		alreadySynced := false
+		for _, existing := range todoistComments {
+			if strings.Contains(existing.Content, marker) {
+				alreadySynced = true
+				break
+			}
+		}
+		if alreadySynced {
+			continue
+		}
+
 		authorName := ""
 		if jc.Author != nil {
 			authorName = jc.Author.DisplayName
 		}
-		syncedContent := fmt.Sprintf(commentFromJiraPrefix, authorName) + "\n" + jira.ADFToText(jc.Body)
-		if slices.Contains(existingComments, syncedContent) {
-			continue
-		}
+		syncedContent := fmt.Sprintf(commentFromJiraPrefix, authorName, jc.ID) + "\n" + jira.ADFToText(jc.Body)
 		_, err := e.todoist.CreateComment(ctx, todoist.CreateCommentRequest{
 			TaskID:  todoistTaskID,
 			Content: syncedContent,

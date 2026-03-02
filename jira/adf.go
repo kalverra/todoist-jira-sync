@@ -17,6 +17,19 @@ type adfNode struct {
 	Type    string    `json:"type"`
 	Text    string    `json:"text,omitempty"`
 	Content []adfNode `json:"content,omitempty"`
+	Marks   []adfMark `json:"marks,omitempty"`
+	Attrs   adfAttrs  `json:"attrs"`
+}
+
+type adfMark struct {
+	Type  string   `json:"type"`
+	Attrs adfAttrs `json:"attrs"`
+}
+
+type adfAttrs struct {
+	Href string `json:"href,omitempty"`
+	URL  string `json:"url,omitempty"`
+	Text string `json:"text,omitempty"`
 }
 
 // TextToADF wraps plain text into an ADF document.
@@ -61,7 +74,19 @@ func ADFToText(doc json.RawMessage) string {
 
 func extractText(node adfNode) string {
 	if node.Type == "text" {
+		if href := linkHref(node.Marks); href != "" && href != node.Text {
+			return node.Text + " " + href
+		}
 		return node.Text
+	}
+	if node.Type == "inlineCard" {
+		if node.Attrs.URL != "" {
+			return node.Attrs.URL
+		}
+		return ""
+	}
+	if node.Type == "hardBreak" {
+		return "\n"
 	}
 	if len(node.Content) == 0 {
 		return ""
@@ -73,4 +98,13 @@ func extractText(node adfNode) string {
 		}
 	}
 	return strings.Join(parts, "")
+}
+
+func linkHref(marks []adfMark) string {
+	for _, m := range marks {
+		if m.Type == "link" && m.Attrs.Href != "" {
+			return m.Attrs.Href
+		}
+	}
+	return ""
 }

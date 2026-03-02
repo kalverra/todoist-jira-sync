@@ -8,16 +8,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/joho/godotenv"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-)
 
-func TestMain(m *testing.M) {
-	_ = godotenv.Load("../.env")
-	os.Exit(m.Run())
-}
+	"github.com/kalverra/todoist-jira-sync/config"
+)
 
 func e2eSetup(t *testing.T) (*Client, string) {
 	t.Helper()
@@ -25,21 +21,16 @@ func e2eSetup(t *testing.T) (*Client, string) {
 	if os.Getenv("RUN_E2E_TESTS") != "true" {
 		t.Skip("set RUN_E2E_TESTS=true to run E2E tests")
 	}
-	for _, env := range []string{
-		"TODOIST_API_TOKEN", "TODOIST_PROJECT",
-	} {
-		require.NotEmpty(t, os.Getenv(env),
-			"%s must be set for E2E tests", env,
-		)
-	}
+	config, err := config.Load()
+	require.NoError(t, err)
 
 	logger := zerolog.New(
 		zerolog.ConsoleWriter{Out: os.Stderr},
 	).With().Timestamp().Logger()
-	client := NewClient(os.Getenv("TODOIST_API_TOKEN"), logger)
+	client := NewClient(config.TodoistToken, logger)
 
 	project, err := client.FindProjectByName(
-		context.Background(), os.Getenv("TODOIST_PROJECT"),
+		context.Background(), config.TodoistProject,
 	)
 	require.NoError(t, err)
 	return client, project.ID
@@ -49,7 +40,8 @@ func testID() string {
 	return uuid.New().String()[:8]
 }
 
-func TestTodoistTaskCRUD(t *testing.T) { //nolint:paralleltest
+func TestTodoistTaskCRUD(t *testing.T) {
+	t.Parallel()
 	client, projectID := e2eSetup(t)
 	ctx := context.Background()
 	dueDate := time.Now()
@@ -100,7 +92,8 @@ func TestTodoistTaskCRUD(t *testing.T) { //nolint:paralleltest
 	assert.Equal(t, newDue, fetched2.Due.Date)
 }
 
-func TestTodoistComments(t *testing.T) { //nolint:paralleltest
+func TestTodoistComments(t *testing.T) {
+	t.Parallel()
 	client, projectID := e2eSetup(t)
 	ctx := context.Background()
 
@@ -132,7 +125,8 @@ func TestTodoistComments(t *testing.T) { //nolint:paralleltest
 	assert.Equal(t, commentBody, comments[0].Content)
 }
 
-func TestTodoistSections(t *testing.T) { //nolint:paralleltest
+func TestTodoistSections(t *testing.T) {
+	t.Parallel()
 	client, projectID := e2eSetup(t)
 	ctx := context.Background()
 
