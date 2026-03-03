@@ -136,6 +136,11 @@ type CreateCommentRequest struct {
 	Content string `json:"content"`
 }
 
+// UpdateCommentRequest is the payload for updating a Todoist comment.
+type UpdateCommentRequest struct {
+	Content string `json:"content"`
+}
+
 // MoveTaskRequest is the payload for the POST /tasks/{id}/move endpoint.
 type MoveTaskRequest struct {
 	ProjectID string `json:"project_id,omitempty"`

@@ -85,6 +85,12 @@ func extractText(node adfNode) string {
 		}
 		return ""
 	}
+	if node.Type == "mention" {
+		if node.Attrs != nil && node.Attrs.Text != "" {
+			return node.Attrs.Text
+		}
+		return ""
+	}
 	if node.Type == "hardBreak" {
 		return "\n"
 	}

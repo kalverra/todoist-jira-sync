@@ -28,6 +28,9 @@ type Engine struct {
 	jira    *jira.Client
 	cfg     *config.Config
 	logger  zerolog.Logger
+
+	cachedProjectID string
+	cachedSections  sectionMap
 }
 
 // NewEngine creates a new sync engine.
@@ -128,8 +131,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	e.logger.Info().Msg("syncing todoist and jira")
 
 	var (
-		project              *todoist.Project
-		sections             []todoist.Section
+		projectID            string
 		secMap               sectionMap
 		tasks                []todoist.Task
 		completedTodoistKeys map[string]bool
@@ -139,30 +141,38 @@ func (e *Engine) Run(ctx context.Context) error {
 	)
 
 	eg.Go(func() error {
+		if e.cachedProjectID == "" {
+			p, err := e.todoist.FindProjectByName(ctx, e.cfg.TodoistProject)
+			if err != nil {
+				return fmt.Errorf("find todoist project: %w", err)
+			}
+			e.cachedProjectID = p.ID
+			e.logger.Debug().
+				Str("project_id", p.ID).
+				Str("project_name", p.Name).
+				Msg("found todoist project")
+		}
+		projectID = e.cachedProjectID
+
+		if e.cachedSections.byID == nil {
+			sections, err := e.todoist.GetSections(ctx, projectID)
+			if err != nil {
+				return fmt.Errorf("get todoist sections: %w", err)
+			}
+			e.cachedSections = buildSectionMap(sections)
+			e.logger.Debug().Int("count", len(sections)).Msg("fetched todoist sections")
+		}
+		secMap = e.cachedSections
+
 		var todoistErr error
-		project, todoistErr = e.todoist.FindProjectByName(ctx, e.cfg.TodoistProject)
-		if todoistErr != nil {
-			return fmt.Errorf("find todoist project: %w", todoistErr)
-		}
-		e.logger.Debug().
-			Str("project_id", project.ID).
-			Str("project_name", project.Name).
-			Msg("found todoist project")
-
-		sections, todoistErr = e.todoist.GetSections(ctx, project.ID)
-		if todoistErr != nil {
-			return fmt.Errorf("get todoist sections: %w", todoistErr)
-		}
-		secMap = buildSectionMap(sections)
-
-		tasks, todoistErr = e.todoist.GetTasks(ctx, project.ID)
+		tasks, todoistErr = e.todoist.GetTasks(ctx, projectID)
 		if todoistErr != nil {
 			return fmt.Errorf("get todoist tasks: %w", todoistErr)
 		}
 
 		since := time.Now().Add(-72 * time.Hour).UTC().Format(time.RFC3339)
 		until := time.Now().UTC().Format(time.RFC3339)
-		completedTasks, err := e.todoist.GetCompletedTasks(ctx, project.ID, since, until)
+		completedTasks, err := e.todoist.GetCompletedTasks(ctx, projectID, since, until)
 		if err != nil {
 			e.logger.Warn().Err(err).Msg("failed to fetch completed todoist tasks, skipping completion sync")
 		} else {
@@ -242,7 +252,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 
 	for _, issue := range unlinkedJiraIssues {
-		if err := e.createTodoistFromJira(ctx, issue, project.ID, secMap, &summary); err != nil {
+		if err := e.createTodoistFromJira(ctx, issue, projectID, secMap, &summary); err != nil {
 			e.logger.Error().Err(err).
 				Str("issue_key", issue.Key).
 				Str("summary", issue.Fields.Summary).
@@ -264,7 +274,7 @@ func (e *Engine) Run(ctx context.Context) error {
 				Msg("linked jira issue not found, skipping")
 			continue
 		}
-		if err := e.syncLinkedPair(ctx, task, issue, project.ID, secMap, &summary); err != nil {
+		if err := e.syncLinkedPair(ctx, task, issue, projectID, secMap, &summary); err != nil {
 			e.logger.Error().Err(err).
 				Str("task_id", task.ID).
 				Str("issue_key", issue.Key).
@@ -590,23 +600,35 @@ func (e *Engine) syncCommentsToTodoist(
 	}
 
 	for _, jc := range issue.Fields.Comment.Comments {
-		marker := fmt.Sprintf(jiraCommentMarker, jc.ID)
-		alreadySynced := false
-		for _, existing := range todoistComments {
-			if strings.Contains(existing.Content, marker) {
-				alreadySynced = true
-				break
-			}
-		}
-		if alreadySynced {
-			continue
-		}
-
 		authorName := ""
 		if jc.Author != nil {
 			authorName = jc.Author.DisplayName
 		}
 		syncedContent := fmt.Sprintf(commentFromJiraPrefix, authorName, jc.ID) + "\n" + jira.ADFToText(jc.Body)
+
+		marker := fmt.Sprintf(jiraCommentMarker, jc.ID)
+		var existingComment *todoist.Comment
+		for i, existing := range todoistComments {
+			if strings.Contains(existing.Content, marker) {
+				existingComment = &todoistComments[i]
+				break
+			}
+		}
+
+		if existingComment != nil {
+			if existingComment.Content != syncedContent {
+				if _, err := e.todoist.UpdateComment(ctx, existingComment.ID, todoist.UpdateCommentRequest{
+					Content: syncedContent,
+				}); err != nil {
+					e.logger.Error().Err(err).
+						Str("task_id", todoistTaskID).
+						Str("comment_id", existingComment.ID).
+						Msg("failed to update comment in todoist")
+				}
+			}
+			continue
+		}
+
 		_, err := e.todoist.CreateComment(ctx, todoist.CreateCommentRequest{
 			TaskID:  todoistTaskID,
 			Content: syncedContent,

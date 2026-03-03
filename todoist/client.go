@@ -342,6 +342,24 @@ func (c *Client) CreateComment(
 	return &comment, nil
 }
 
+// UpdateComment updates a comment's content.
+func (c *Client) UpdateComment(
+	ctx context.Context,
+	commentID string,
+	req UpdateCommentRequest,
+) (*Comment, error) {
+	var comment Comment
+	_, err := c.http.R().
+		SetContext(ctx).
+		SetBody(req).
+		SetResult(&comment).
+		Post("/comments/" + commentID)
+	if err != nil {
+		return nil, err
+	}
+	return &comment, nil
+}
+
 // DeleteComment deletes a comment by ID.
 func (c *Client) DeleteComment(ctx context.Context, commentID string) error {
 	_, err := c.http.R().

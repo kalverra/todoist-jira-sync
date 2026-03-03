@@ -114,6 +114,16 @@ func TestADFToText(t *testing.T) {
 			adf:  `{"type":"doc","version":1,"content":[{"type":"paragraph","content":[{"type":"text","text":"PR to add docs: "},{"type":"inlineCard","attrs":{"url":"https://github.com/smartcontractkit/central-docs/pull/78"}}]}]}`,
 			want: "PR to add docs: https://github.com/smartcontractkit/central-docs/pull/78",
 		},
+		{
+			name: "mention with text",
+			adf:  `{"type":"doc","version":1,"content":[{"type":"paragraph","content":[{"type":"mention","attrs":{"id":"abc123","text":"@Name Of User"}},{"type":"text","text":" finished most of this"}]}]}`,
+			want: "@Name Of User finished most of this",
+		},
+		{
+			name: "mention without text",
+			adf:  `{"type":"doc","version":1,"content":[{"type":"paragraph","content":[{"type":"mention","attrs":{"id":"abc123"}},{"type":"text","text":" did something"}]}]}`,
+			want: " did something",
+		},
 	}
 
 	for _, tt := range tests {
