@@ -23,17 +23,18 @@ type Issue struct {
 // IssueFields holds the fields of a Jira issue.
 // Description and comment Body are ADF (Atlassian Document Format) JSON.
 type IssueFields struct {
-	Summary     string          `json:"summary,omitempty"`
-	Description json.RawMessage `json:"description,omitempty"`
-	Status      *Status         `json:"status,omitempty"`
-	Priority    *Priority       `json:"priority,omitempty"`
-	Resolution  *Resolution     `json:"resolution,omitempty"`
-	Updated     string          `json:"updated,omitempty"`
-	Duedate     string          `json:"duedate,omitempty"`
-	Comment     *CommentPage    `json:"comment,omitempty"`
-	Project     *Project        `json:"project,omitempty"`
-	IssueType   *IssueType      `json:"issuetype,omitempty"`
-	SprintRaw   json.RawMessage `json:"customfield_10020,omitempty"`
+	Summary        string          `json:"summary,omitempty"`
+	Description    json.RawMessage `json:"description,omitempty"`
+	Status         *Status         `json:"status,omitempty"`
+	Priority       *Priority       `json:"priority,omitempty"`
+	Resolution     *Resolution     `json:"resolution,omitempty"`
+	Updated        string          `json:"updated,omitempty"`
+	Duedate        string          `json:"duedate,omitempty"`
+	Comment        *CommentPage    `json:"comment,omitempty"`
+	Project        *Project        `json:"project,omitempty"`
+	IssueType      *IssueType      `json:"issuetype,omitempty"`
+	SprintRaw      json.RawMessage `json:"customfield_10020,omitempty"`
+	StoryPointsRaw *float64        `json:"customfield_10016,omitempty"`
 }
 
 // Status represents a Jira workflow status.

@@ -2,6 +2,7 @@ package jira
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -27,9 +28,12 @@ type adfMark struct {
 }
 
 type adfAttrs struct {
-	Href string `json:"href,omitempty"`
-	URL  string `json:"url,omitempty"`
-	Text string `json:"text,omitempty"`
+	Href     string `json:"href,omitempty"`
+	URL      string `json:"url,omitempty"`
+	Text     string `json:"text,omitempty"`
+	Level    int    `json:"level,omitempty"`
+	Language string `json:"language,omitempty"`
+	Order    int    `json:"order,omitempty"`
 }
 
 // TextToADF wraps plain text into an ADF document.
@@ -55,9 +59,9 @@ func TextToADF(text string) json.RawMessage {
 	return b
 }
 
-// ADFToText extracts all text content from an ADF document, joining
-// top-level blocks (paragraphs, headings, etc.) with newlines.
-func ADFToText(doc json.RawMessage) string {
+// ADFToMarkdown converts an ADF document to markdown, preserving headings,
+// lists, code blocks, blockquotes, and inline formatting marks.
+func ADFToMarkdown(doc json.RawMessage) string {
 	if len(doc) == 0 {
 		return ""
 	}
@@ -65,19 +69,83 @@ func ADFToText(doc json.RawMessage) string {
 	if err := json.Unmarshal(doc, &d); err != nil {
 		return string(doc)
 	}
-	lines := make([]string, 0, len(d.Content))
+	blocks := make([]string, 0, len(d.Content))
 	for _, block := range d.Content {
-		lines = append(lines, extractText(block))
+		blocks = append(blocks, blockToMarkdown(block))
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(blocks, "\n")
 }
 
-func extractText(node adfNode) string {
-	if node.Type == "text" {
-		if href := linkHref(node.Marks); href != "" && href != node.Text {
-			return node.Text + " " + href
+func blockToMarkdown(node adfNode) string {
+	switch node.Type {
+	case "heading":
+		level := 1
+		if node.Attrs != nil && node.Attrs.Level > 0 {
+			level = node.Attrs.Level
 		}
-		return node.Text
+		return strings.Repeat("#", level) + " " + inlineContent(node.Content)
+
+	case "bulletList":
+		items := make([]string, 0, len(node.Content))
+		for _, item := range node.Content {
+			items = append(items, "- "+listItemContent(item))
+		}
+		return strings.Join(items, "\n")
+
+	case "orderedList":
+		start := 1
+		if node.Attrs != nil && node.Attrs.Order > 0 {
+			start = node.Attrs.Order
+		}
+		items := make([]string, 0, len(node.Content))
+		for i, item := range node.Content {
+			items = append(items, fmt.Sprintf("%d. %s", start+i, listItemContent(item)))
+		}
+		return strings.Join(items, "\n")
+
+	case "blockquote":
+		lines := make([]string, 0, len(node.Content))
+		for _, child := range node.Content {
+			lines = append(lines, "> "+blockToMarkdown(child))
+		}
+		return strings.Join(lines, "\n")
+
+	case "codeBlock":
+		lang := ""
+		if node.Attrs != nil {
+			lang = node.Attrs.Language
+		}
+		return "```" + lang + "\n" + inlineContent(node.Content) + "\n```"
+
+	case "rule":
+		return "---"
+
+	default:
+		return inlineContent(node.Content)
+	}
+}
+
+func listItemContent(item adfNode) string {
+	parts := make([]string, 0, len(item.Content))
+	for _, child := range item.Content {
+		parts = append(parts, blockToMarkdown(child))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func inlineContent(nodes []adfNode) string {
+	parts := make([]string, 0, len(nodes))
+	for _, child := range nodes {
+		if t := inlineToMarkdown(child); t != "" {
+			parts = append(parts, t)
+		}
+	}
+	return strings.Join(parts, "")
+}
+
+func inlineToMarkdown(node adfNode) string {
+	if node.Type == "text" {
+		return applyMarks(node.Text, node.Marks)
 	}
 	if node.Type == "inlineCard" {
 		if node.Attrs != nil && node.Attrs.URL != "" {
@@ -94,23 +162,25 @@ func extractText(node adfNode) string {
 	if node.Type == "hardBreak" {
 		return "\n"
 	}
-	if len(node.Content) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(node.Content))
-	for _, child := range node.Content {
-		if t := extractText(child); t != "" {
-			parts = append(parts, t)
-		}
-	}
-	return strings.Join(parts, "")
+	return inlineContent(node.Content)
 }
 
-func linkHref(marks []adfMark) string {
+func applyMarks(text string, marks []adfMark) string {
 	for _, m := range marks {
-		if m.Type == "link" && m.Attrs != nil && m.Attrs.Href != "" {
-			return m.Attrs.Href
+		switch m.Type {
+		case "strong":
+			text = "**" + text + "**"
+		case "em":
+			text = "*" + text + "*"
+		case "code":
+			text = "`" + text + "`"
+		case "strike":
+			text = "~~" + text + "~~"
+		case "link":
+			if m.Attrs != nil && m.Attrs.Href != "" && m.Attrs.Href != text {
+				text = "[" + text + "](" + m.Attrs.Href + ")"
+			}
 		}
 	}
-	return ""
+	return text
 }

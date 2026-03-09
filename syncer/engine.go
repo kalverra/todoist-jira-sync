@@ -64,6 +64,7 @@ type syncSummary struct {
 	updatedToTodoist []syncAction
 	updatedToJira    []syncAction
 	completedTodoist []syncAction
+	deletedTodoist   []syncAction
 	resolvedJira     []syncAction
 	errors           []syncAction
 }
@@ -83,6 +84,7 @@ func (s *syncSummary) print(duration time.Duration) {
 		{"Updated Jira -> Todoist", s.updatedToTodoist},
 		{"Updated Todoist -> Jira", s.updatedToJira},
 		{"Completed in Todoist", s.completedTodoist},
+		{"Deleted from Todoist", s.deletedTodoist},
 		{"Resolved in Jira", s.resolvedJira},
 		{"Errors", s.errors},
 	}
@@ -123,6 +125,7 @@ var searchFields = []string{
 	"resolution",
 	jira.SprintInfoField,
 	jira.EpicLinkField,
+	jira.StoryPointsField,
 }
 
 // Run executes a single sync cycle.
@@ -232,10 +235,10 @@ func (e *Engine) Run(ctx context.Context) error {
 		if issues[i].Fields != nil && issues[i].Fields.Resolution != nil {
 			continue
 		}
-		if !jira.InCurrentSprint(&issues[i]) {
+		if !jira.InCurrentOrFutureSprint(&issues[i]) {
 			e.logger.Debug().
 				Str("issue_key", issues[i].Key).
-				Msg("jira issue not in active sprint, skipping todoist creation")
+				Msg("jira issue not in active or future sprint, skipping todoist creation")
 			continue
 		}
 		unlinkedJiraIssues = append(unlinkedJiraIssues, &issues[i])
@@ -380,15 +383,19 @@ func (e *Engine) createTodoistFromJira(
 	}
 
 	linkedContent := PrependJiraLink(issue.Fields.Summary, issue.Key, e.cfg.JiraURL)
+	labels := []string{linkLabel}
+	if spLabel := jira.StoryPointsLabel(issue); spLabel != "" {
+		labels = append(labels, spLabel)
+	}
 	createReq := todoist.CreateTaskRequest{
 		Content:     linkedContent,
-		Description: jira.ADFToText(issue.Fields.Description),
+		Description: jira.ADFToMarkdown(issue.Fields.Description),
 		ProjectID:   projectID,
 		SectionID:   sectionID,
-		Labels:      []string{linkLabel},
+		Labels:      labels,
 		Priority:    jira.TodoistPriority(priorityID),
 	}
-	if sprintEnd := jira.SprintEndDate(issue); sprintEnd != "" {
+	if sprintEnd := jira.RelevantSprintEndDate(issue); sprintEnd != "" {
 		sprintEndTime, err := time.Parse("2006-01-02", sprintEnd)
 		if err != nil {
 			return fmt.Errorf("parse sprint end date: %w", err)
@@ -444,6 +451,15 @@ func (e *Engine) syncLinkedPair(
 		return e.todoist.CloseTask(ctx, task.ID)
 	}
 
+	if !jira.InCurrentOrFutureSprint(issue) {
+		e.logger.Info().
+			Str("task_id", task.ID).
+			Str("issue_key", issue.Key).
+			Msg("jira issue no longer in active or future sprint, deleting todoist task")
+		s.deletedTodoist = append(s.deletedTodoist, syncAction{jiraKey: issue.Key, summary: issue.Fields.Summary})
+		return e.todoist.DeleteTask(ctx, task.ID)
+	}
+
 	jiraUpdated, err := time.Parse("2006-01-02T15:04:05.000-0700", issue.Fields.Updated)
 	if err != nil {
 		jiraUpdated, err = time.Parse(time.RFC3339, issue.Fields.Updated)
@@ -489,13 +505,23 @@ func (e *Engine) pushJiraToTodoist(
 	secMap sectionMap,
 ) error {
 	linkedContent := PrependJiraLink(issue.Fields.Summary, issue.Key, e.cfg.JiraURL)
-	desc := jira.ADFToText(issue.Fields.Description)
+	desc := jira.ADFToMarkdown(issue.Fields.Description)
+
+	priorityID := ""
+	if issue.Fields.Priority != nil {
+		priorityID = issue.Fields.Priority.ID
+	}
+	todoistPriority := jira.TodoistPriority(priorityID)
+
+	labels := storyPointLabels(task.Labels, jira.StoryPointsLabel(issue))
 
 	updateReq := todoist.UpdateTaskRequest{
 		Content:     &linkedContent,
 		Description: &desc,
+		Priority:    &todoistPriority,
+		Labels:      labels,
 	}
-	if sprintEnd := jira.SprintEndDate(issue); sprintEnd != "" {
+	if sprintEnd := jira.RelevantSprintEndDate(issue); sprintEnd != "" {
 		sprintEndTime, err := time.Parse("2006-01-02", sprintEnd)
 		if err != nil {
 			return fmt.Errorf("parse sprint end date: %w", err)
@@ -604,7 +630,7 @@ func (e *Engine) syncCommentsToTodoist(
 		if jc.Author != nil {
 			authorName = jc.Author.DisplayName
 		}
-		syncedContent := fmt.Sprintf(commentFromJiraPrefix, authorName, jc.ID) + "\n" + jira.ADFToText(jc.Body)
+		syncedContent := fmt.Sprintf(commentFromJiraPrefix, authorName, jc.ID) + "\n" + jira.ADFToMarkdown(jc.Body)
 
 		marker := fmt.Sprintf(jiraCommentMarker, jc.ID)
 		var existingComment *todoist.Comment
@@ -689,7 +715,22 @@ func findIssueByKey(issues []jira.Issue, key string) (*jira.Issue, bool) {
 
 // statusEquivalent returns true if two Jira statuses are functionally the same.
 var equivalentStatuses = [][]string{
-	{"To Do", "Open"},
+	{"To Do", "Open", "Descheduled"},
+}
+
+// storyPointLabels returns the task's labels with any old "*pts" label
+// replaced by newLabel. If newLabel is empty, old points labels are removed.
+func storyPointLabels(existing []string, newLabel string) []string {
+	labels := make([]string, 0, len(existing)+1)
+	for _, l := range existing {
+		if !strings.HasSuffix(l, "pts") {
+			labels = append(labels, l)
+		}
+	}
+	if newLabel != "" {
+		labels = append(labels, newLabel)
+	}
+	return labels
 }
 
 func statusEquivalent(a, b string) bool {

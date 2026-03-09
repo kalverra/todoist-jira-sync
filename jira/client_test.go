@@ -73,7 +73,7 @@ func TestJiraIssueCRUD(t *testing.T) { //nolint:paralleltest
 
 	issue := createTestIssue(t, client, project)
 	assert.NotEmpty(t, issue.Key)
-	assert.Equal(t, "e2e test issue", ADFToText(issue.Fields.Description))
+	assert.Equal(t, "e2e test issue", ADFToMarkdown(issue.Fields.Description))
 	assert.Equal(t, time.Now().Format("2006-01-02"), issue.Fields.Duedate)
 
 	newSummary := fmt.Sprintf("e2e-test-updated-%s", testID())
@@ -92,6 +92,6 @@ func TestJiraIssueCRUD(t *testing.T) { //nolint:paralleltest
 	fetched, err := client.GetIssue(ctx, issue.Key, nil)
 	require.NoError(t, err)
 	assert.Equal(t, newSummary, fetched.Fields.Summary)
-	assert.Equal(t, newDesc, ADFToText(fetched.Fields.Description))
+	assert.Equal(t, newDesc, ADFToMarkdown(fetched.Fields.Description))
 	assert.Equal(t, newDue, fetched.Fields.Duedate)
 }

@@ -128,6 +128,8 @@ type UpdateTaskRequest struct {
 	Description  *string    `json:"description,omitempty"`
 	DueDate      *time.Time `json:"due_date,omitempty"`
 	DeadlineDate *time.Time `json:"deadline_date,omitempty"`
+	Priority     *int       `json:"priority,omitempty"`
+	Labels       []string   `json:"labels,omitempty"`
 }
 
 // CreateCommentRequest is the payload for creating a Todoist comment.

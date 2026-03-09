@@ -19,6 +19,8 @@ const (
 	SprintInfoField = "customfield_10020"
 	// EpicLinkField is the custom field name to get epic link for a Jira issue.
 	EpicLinkField = "customfield_10014"
+	// StoryPointsField is the custom field name for story points in Jira Cloud.
+	StoryPointsField = "customfield_10016"
 )
 
 // Client communicates with the Jira Cloud REST API v3 via Resty.
@@ -233,6 +235,52 @@ func SprintEndDate(issue *Issue) string {
 	return t.Format("2006-01-02")
 }
 
+// InCurrentOrFutureSprint checks if the issue is in an active or future sprint.
+func InCurrentOrFutureSprint(issue *Issue) bool {
+	return RelevantSprint(issue) != nil
+}
+
+// RelevantSprint returns the most relevant sprint for an issue: the active
+// sprint if present, otherwise the earliest future sprint. Returns nil if
+// the issue has no active or future sprints.
+func RelevantSprint(issue *Issue) *SprintInfo {
+	if issue.Fields == nil || len(issue.Fields.SprintRaw) == 0 || string(issue.Fields.SprintRaw) == "null" {
+		return nil
+	}
+
+	var sprints []SprintInfo
+	if err := json.Unmarshal(issue.Fields.SprintRaw, &sprints); err != nil {
+		return nil
+	}
+
+	var earliest *SprintInfo
+	for i := range sprints {
+		if sprints[i].State == "active" {
+			return &sprints[i]
+		}
+		if sprints[i].State == "future" {
+			if earliest == nil || sprints[i].ID < earliest.ID {
+				earliest = &sprints[i]
+			}
+		}
+	}
+	return earliest
+}
+
+// RelevantSprintEndDate returns the end date of the most relevant sprint
+// (active or earliest future) as "YYYY-MM-DD", or empty string if unavailable.
+func RelevantSprintEndDate(issue *Issue) string {
+	sprint := RelevantSprint(issue)
+	if sprint == nil || sprint.EndDate == "" {
+		return ""
+	}
+	t, err := time.Parse(time.RFC3339, sprint.EndDate)
+	if err != nil {
+		return ""
+	}
+	return t.Format("2006-01-02")
+}
+
 // TodoistPriority converts a Jira priority ID to a Todoist priority level.
 func TodoistPriority(jiraPriorityID string) int {
 	jiraPriorityID = strings.TrimSpace(jiraPriorityID)
@@ -245,4 +293,17 @@ func TodoistPriority(jiraPriorityID string) int {
 		return 2
 	}
 	return 1
+}
+
+// StoryPointsLabel returns a Todoist label like "3pts" for the issue's story
+// points, or "" if unset. Fractional values are kept (e.g. "0.5pts").
+func StoryPointsLabel(issue *Issue) string {
+	if issue.Fields == nil || issue.Fields.StoryPointsRaw == nil {
+		return ""
+	}
+	sp := *issue.Fields.StoryPointsRaw
+	if sp == float64(int(sp)) {
+		return fmt.Sprintf("%dpts", int(sp))
+	}
+	return fmt.Sprintf("%gpts", sp)
 }

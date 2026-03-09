@@ -125,7 +125,7 @@ func TestSyncTodoistToJira(t *testing.T) { //nolint:paralleltest
 	issue, err := env.jiraClient.GetIssue(ctx, jiraKey, nil)
 	require.NoError(t, err)
 	assert.Equal(t, taskName, issue.Fields.Summary)
-	assert.Contains(t, jira.ADFToText(issue.Fields.Description), "todoist to jira test")
+	assert.Contains(t, jira.ADFToMarkdown(issue.Fields.Description), "todoist to jira test")
 	assert.Equal(t, taskName, StripJiraPrefix(updatedTask.Content))
 }
 
@@ -230,7 +230,7 @@ func TestSyncComments(t *testing.T) { //nolint:paralleltest
 	foundTodoistComment := false
 	if issue.Fields.Comment != nil {
 		for _, c := range issue.Fields.Comment.Comments {
-			if jira.ADFToText(c.Body) == "[From Todoist] "+todoistComment {
+			if jira.ADFToMarkdown(c.Body) == "[From Todoist] "+todoistComment {
 				foundTodoistComment = true
 				break
 			}
