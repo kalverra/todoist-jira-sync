@@ -92,11 +92,12 @@ func TestSyncTodoistToJira(t *testing.T) { //nolint:paralleltest
 
 	taskName := fmt.Sprintf("e2e-sync-t2j-%s", testID())
 	dueDate := time.Now()
+	dueDateStr := dueDate.Format(time.DateOnly)
 	task, err := env.todoistClient.CreateTask(ctx, todoist.CreateTaskRequest{
 		Content:     taskName,
 		Description: "todoist to jira test",
 		ProjectID:   env.projectID,
-		DueDate:     &dueDate,
+		DueDate:     &dueDateStr,
 		Labels:      []string{linkLabel},
 	})
 	require.NoError(t, err)
@@ -320,10 +321,11 @@ func TestSyncDueDateUpdate(t *testing.T) { //nolint:paralleltest
 
 	taskName := fmt.Sprintf("e2e-sync-due-%s", testID())
 	dueDate := time.Now()
+	dueDateStr := dueDate.Format(time.DateOnly)
 	task, err := env.todoistClient.CreateTask(ctx, todoist.CreateTaskRequest{
 		Content:   taskName,
 		ProjectID: env.projectID,
-		DueDate:   &dueDate,
+		DueDate:   &dueDateStr,
 		Labels:    []string{linkLabel},
 	})
 	require.NoError(t, err)

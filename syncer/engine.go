@@ -65,6 +65,7 @@ type syncSummary struct {
 	updatedToJira    []syncAction
 	completedTodoist []syncAction
 	deletedTodoist   []syncAction
+	revertedTodoist  []syncAction
 	resolvedJira     []syncAction
 	errors           []syncAction
 }
@@ -85,6 +86,7 @@ func (s *syncSummary) print(duration time.Duration) {
 		{"Updated Todoist -> Jira", s.updatedToJira},
 		{"Completed in Todoist", s.completedTodoist},
 		{"Deleted from Todoist", s.deletedTodoist},
+		{"Reverted in Todoist", s.revertedTodoist},
 		{"Resolved in Jira", s.resolvedJira},
 		{"Errors", s.errors},
 	}
@@ -112,6 +114,12 @@ func (s *syncSummary) print(duration time.Duration) {
 	fmt.Fprintf(&b, "\nCompleted in %s\n", duration.Truncate(time.Millisecond))
 	b.WriteString("================================\n")
 	fmt.Print(b.String())
+}
+
+var activeSections = map[string]bool{
+	"In Progress": true,
+	"Blocked":     true,
+	"In Review":   true,
 }
 
 var searchFields = []string{
@@ -408,6 +416,10 @@ func (e *Engine) createTodoistFromJira(
 		}
 		createReq.DeadlineDate = &dueDate
 	}
+	if activeSections[sectionName] {
+		today := todayDateString()
+		createReq.DueDate = &today
+	}
 
 	task, err := e.todoist.CreateTask(ctx, createReq)
 	if err != nil {
@@ -477,7 +489,7 @@ func (e *Engine) syncLinkedPair(
 			Str("task_id", task.ID).
 			Msg("could not parse todoist updated_at, assuming todoist is newer")
 		s.updatedToJira = append(s.updatedToJira, syncAction{jiraKey: issue.Key, summary: issue.Fields.Summary})
-		return e.pushTodoistToJira(ctx, task, issue, secMap)
+		return e.pushTodoistToJira(ctx, task, issue, projectID, secMap, s)
 	}
 
 	if jiraUpdated.After(todoistUpdated) {
@@ -494,7 +506,7 @@ func (e *Engine) syncLinkedPair(
 		Str("issue_key", issue.Key).
 		Msg("todoist is newer (or same), syncing todoist -> jira")
 	s.updatedToJira = append(s.updatedToJira, syncAction{jiraKey: issue.Key, summary: issue.Fields.Summary})
-	return e.pushTodoistToJira(ctx, task, issue, secMap)
+	return e.pushTodoistToJira(ctx, task, issue, projectID, secMap, s)
 }
 
 func (e *Engine) pushJiraToTodoist(
@@ -528,11 +540,15 @@ func (e *Engine) pushJiraToTodoist(
 		}
 		updateReq.DeadlineDate = &sprintEndTime
 	} else if issue.Fields.Duedate != "" {
-		dueDate, err := time.Parse("2006-01-02", issue.Fields.Duedate)
-		if err != nil {
-			return fmt.Errorf("parse due date: %w", err)
-		}
-		updateReq.DueDate = &dueDate
+		updateReq.DueDate = &issue.Fields.Duedate
+	}
+	targetSection := ""
+	if issue.Fields.Status != nil {
+		targetSection = e.cfg.JiraToTodoistStatus(issue.Fields.Status.Name)
+	}
+	if activeSections[targetSection] {
+		today := todayDateString()
+		updateReq.DueDate = &today
 	}
 
 	if _, err := e.todoist.UpdateTask(ctx, task.ID, updateReq); err != nil {
@@ -575,7 +591,9 @@ func (e *Engine) pushTodoistToJira(
 	ctx context.Context,
 	task *todoist.Task,
 	issue *jira.Issue,
+	projectID string,
 	secMap sectionMap,
+	s *syncSummary,
 ) error {
 	updateIssue := &jira.Issue{
 		Fields: &jira.IssueFields{},
@@ -603,12 +621,78 @@ func (e *Engine) pushTodoistToJira(
 					Str("target_jira_status", targetJiraStatus).
 					Str("current_todoist_status", sectionName).
 					Str("issue", issue.Fields.Summary).
-					Msg("failed to transition jira issue based on todoist status change")
+					Msg("failed to transition jira issue, reverting todoist task")
+
+				e.revertTodoistSection(ctx, task, issue, projectID, secMap, currentStatus)
+				comment := fmt.Sprintf(
+					"Sync failed: could not transition [%s] from %q to %q in Jira.\nReason: %s\nTask moved back to %q in Todoist. Please make this change directly in Jira.",
+					issue.Key,
+					currentStatus,
+					targetJiraStatus,
+					err.Error(),
+					e.cfg.JiraToTodoistStatus(currentStatus),
+				)
+				if _, cerr := e.todoist.CreateComment(ctx, todoist.CreateCommentRequest{
+					TaskID:  task.ID,
+					Content: comment,
+				}); cerr != nil {
+					e.logger.Warn().Err(cerr).
+						Str("task_id", task.ID).
+						Msg("failed to add revert notification comment to todoist task")
+				}
+				s.revertedTodoist = append(
+					s.revertedTodoist,
+					syncAction{jiraKey: issue.Key, summary: issue.Fields.Summary},
+				)
 			}
 		}
 	}
 
+	if activeSections[sectionName] {
+		today := todayDateString()
+		if _, err := e.todoist.UpdateTask(ctx, task.ID, todoist.UpdateTaskRequest{
+			DueDate: &today,
+		}); err != nil {
+			e.logger.Warn().Err(err).
+				Str("task_id", task.ID).
+				Msg("failed to set today due date on active todoist task")
+		}
+	}
+
 	return nil
+}
+
+func (e *Engine) revertTodoistSection(
+	ctx context.Context,
+	task *todoist.Task,
+	issue *jira.Issue,
+	projectID string,
+	secMap sectionMap,
+	jiraStatus string,
+) {
+	revertSection := e.cfg.JiraToTodoistStatus(jiraStatus)
+	revertSectionID := secMap.byName[revertSection]
+	if revertSectionID == "" && revertSection != "" {
+		sec, err := e.todoist.CreateSection(ctx, projectID, revertSection)
+		if err != nil {
+			e.logger.Warn().Err(err).
+				Str("section", revertSection).
+				Msg("failed to create todoist section for revert")
+			return
+		}
+		revertSectionID = sec.ID
+		secMap.byID[sec.ID] = revertSection
+		secMap.byName[revertSection] = sec.ID
+	}
+	if revertSectionID != "" {
+		if err := e.todoist.MoveTaskToSection(ctx, task.ID, revertSectionID); err != nil {
+			e.logger.Warn().Err(err).
+				Str("task_id", task.ID).
+				Str("issue_key", issue.Key).
+				Str("target_section", revertSection).
+				Msg("failed to revert todoist task section")
+		}
+	}
 }
 
 func (e *Engine) syncCommentsToTodoist(
@@ -731,6 +815,10 @@ func storyPointLabels(existing []string, newLabel string) []string {
 		labels = append(labels, newLabel)
 	}
 	return labels
+}
+
+func todayDateString() string {
+	return time.Now().Format("2006-01-02")
 }
 
 func statusEquivalent(a, b string) bool {

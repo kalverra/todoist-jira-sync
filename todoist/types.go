@@ -1,7 +1,10 @@
 // Package todoist provides a client for the Todoist API v1.
 package todoist
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // paginatedResponse is the wrapper returned by all list endpoints in API v1.
 type paginatedResponse[T any] struct {
@@ -87,7 +90,7 @@ type Comment struct {
 	ID             string              `json:"id"`
 	PostedUID      string              `json:"posted_uid"`
 	Content        string              `json:"content"`
-	FileAttachment map[string]string   `json:"file_attachment"`
+	FileAttachment json.RawMessage     `json:"file_attachment"`
 	UIDsToNotify   []string            `json:"uids_to_notify"`
 	IsDeleted      bool                `json:"is_deleted"`
 	PostedAt       string              `json:"posted_at"`
@@ -116,7 +119,7 @@ type CreateTaskRequest struct {
 	Description  string     `json:"description,omitempty"`
 	ProjectID    string     `json:"project_id,omitempty"`
 	SectionID    string     `json:"section_id,omitempty"`
-	DueDate      *time.Time `json:"due_date,omitempty"`
+	DueDate      *string    `json:"due_date,omitempty"`
 	Labels       []string   `json:"labels,omitempty"`
 	Priority     int        `json:"priority,omitempty"`
 	DeadlineDate *time.Time `json:"deadline_date,omitempty"`
@@ -126,7 +129,7 @@ type CreateTaskRequest struct {
 type UpdateTaskRequest struct {
 	Content      *string    `json:"content,omitempty"`
 	Description  *string    `json:"description,omitempty"`
-	DueDate      *time.Time `json:"due_date,omitempty"`
+	DueDate      *string    `json:"due_date,omitempty"`
 	DeadlineDate *time.Time `json:"deadline_date,omitempty"`
 	Priority     *int       `json:"priority,omitempty"`
 	Labels       []string   `json:"labels,omitempty"`

@@ -45,12 +45,13 @@ func TestTodoistTaskCRUD(t *testing.T) {
 	client, projectID := e2eSetup(t)
 	ctx := context.Background()
 	dueDate := time.Now()
+	dueDateStr := dueDate.Format(time.DateOnly)
 	taskName := fmt.Sprintf("e2e-test-crud-%s", testID())
 	task, err := client.CreateTask(ctx, CreateTaskRequest{
 		Content:     taskName,
 		Description: "initial description",
 		ProjectID:   projectID,
-		DueDate:     &dueDate,
+		DueDate:     &dueDateStr,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
