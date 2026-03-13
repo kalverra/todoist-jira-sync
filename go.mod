@@ -5,7 +5,7 @@ go 1.26.0
 tool gotest.tools/gotestsum
 
 require (
-	github.com/charmbracelet/fang v0.4.4
+	github.com/charmbracelet/fang v1.0.0
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/rs/zerolog v1.34.0
