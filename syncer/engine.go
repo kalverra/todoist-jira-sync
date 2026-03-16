@@ -417,7 +417,7 @@ func (e *Engine) createTodoistFromJira(
 		createReq.DeadlineDate = &dueDate
 	}
 	if activeSections[sectionName] {
-		today := todayDateString()
+		today := workdayDateString()
 		createReq.DueDate = &today
 	}
 
@@ -547,7 +547,7 @@ func (e *Engine) pushJiraToTodoist(
 		targetSection = e.cfg.JiraToTodoistStatus(issue.Fields.Status.Name)
 	}
 	if activeSections[targetSection] {
-		today := todayDateString()
+		today := workdayDateString()
 		updateReq.DueDate = &today
 	}
 
@@ -598,9 +598,6 @@ func (e *Engine) pushTodoistToJira(
 	updateIssue := &jira.Issue{
 		Fields: &jira.IssueFields{},
 	}
-	if task.Due != nil && task.Due.Date != "" {
-		updateIssue.Fields.Duedate = task.Due.Date
-	}
 
 	if err := e.jira.UpdateIssue(ctx, issue.Key, updateIssue); err != nil {
 		return fmt.Errorf("update jira issue: %w", err)
@@ -649,13 +646,22 @@ func (e *Engine) pushTodoistToJira(
 	}
 
 	if activeSections[sectionName] {
-		today := todayDateString()
+		today := workdayDateString()
 		if _, err := e.todoist.UpdateTask(ctx, task.ID, todoist.UpdateTaskRequest{
 			DueDate: &today,
 		}); err != nil {
 			e.logger.Warn().Err(err).
 				Str("task_id", task.ID).
 				Msg("failed to set today due date on active todoist task")
+		}
+	} else {
+		noneDate := "no date"
+		if _, err := e.todoist.UpdateTask(ctx, task.ID, todoist.UpdateTaskRequest{
+			DueString: &noneDate,
+		}); err != nil {
+			e.logger.Warn().Err(err).
+				Str("task_id", task.ID).
+				Msg("failed to clear due date on inactive todoist task")
 		}
 	}
 
@@ -817,8 +823,17 @@ func storyPointLabels(existing []string, newLabel string) []string {
 	return labels
 }
 
-func todayDateString() string {
-	return time.Now().Format("2006-01-02")
+// workdayDateString returns the next viable workday date.
+// If today is a weekend, it returns the next Monday.
+func workdayDateString() string {
+	today := time.Now()
+	if today.Weekday() == time.Saturday {
+		return today.AddDate(0, 0, 2).Format("2006-01-02")
+	}
+	if today.Weekday() == time.Sunday {
+		return today.AddDate(0, 0, 1).Format("2006-01-02")
+	}
+	return today.Format("2006-01-02")
 }
 
 func statusEquivalent(a, b string) bool {

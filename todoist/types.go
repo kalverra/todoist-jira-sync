@@ -114,22 +114,26 @@ type Project struct {
 }
 
 // CreateTaskRequest is the payload for creating a new Todoist task.
+// https://developer.todoist.com/api/v1/#tag/Tasks/operation/create_task_api_v1_tasks_post
 type CreateTaskRequest struct {
 	Content      string     `json:"content"`
 	Description  string     `json:"description,omitempty"`
 	ProjectID    string     `json:"project_id,omitempty"`
 	SectionID    string     `json:"section_id,omitempty"`
 	DueDate      *string    `json:"due_date,omitempty"`
+	DueString    *string    `json:"due_string,omitempty"`
 	Labels       []string   `json:"labels,omitempty"`
 	Priority     int        `json:"priority,omitempty"`
 	DeadlineDate *time.Time `json:"deadline_date,omitempty"`
 }
 
 // UpdateTaskRequest is the payload for updating a Todoist task.
+// https://developer.todoist.com/api/v1/#tag/Tasks/operation/update_task_api_v1_tasks__task_id__post
 type UpdateTaskRequest struct {
 	Content      *string    `json:"content,omitempty"`
 	Description  *string    `json:"description,omitempty"`
 	DueDate      *string    `json:"due_date,omitempty"`
+	DueString    *string    `json:"due_string,omitempty"`
 	DeadlineDate *time.Time `json:"deadline_date,omitempty"`
 	Priority     *int       `json:"priority,omitempty"`
 	Labels       []string   `json:"labels,omitempty"`

@@ -117,6 +117,9 @@ func blockToMarkdown(node adfNode) string {
 		}
 		return "```" + lang + "\n" + inlineContent(node.Content) + "\n```"
 
+	case "mediaSingle", "mediaGroup":
+		return "[IMAGE, See Jira]"
+
 	case "rule":
 		return "---"
 
@@ -158,6 +161,9 @@ func inlineToMarkdown(node adfNode) string {
 			return node.Attrs.Text
 		}
 		return ""
+	}
+	if node.Type == "media" || node.Type == "mediaInline" {
+		return "[IMAGE, See Jira]"
 	}
 	if node.Type == "hardBreak" {
 		return "\n"
