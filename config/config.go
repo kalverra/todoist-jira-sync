@@ -12,17 +12,18 @@ import (
 
 // Config holds all configuration needed to sync Todoist and Jira.
 type Config struct {
-	TodoistToken   string            `mapstructure:"todoist_token"`
-	TodoistProject string            `mapstructure:"todoist_project"`
-	JiraURL        string            `mapstructure:"jira_url"`
-	JiraEmail      string            `mapstructure:"jira_email"`
-	JiraToken      string            `mapstructure:"jira_token"`
-	JiraProject    string            `mapstructure:"jira_project"`
-	JiraIssueTypes []string          `mapstructure:"jira_issue_types"` // issue type names to sync (e.g. Story, Task, Bug); set via flag/env or default
-	Interval       time.Duration     `mapstructure:"interval"`
-	LogLevel       string            `mapstructure:"log_level"`
-	LogFilePath    string            `mapstructure:"log_file_path"`
-	StatusMap      map[string]string `mapstructure:"status_map"`
+	TodoistToken           string            `mapstructure:"todoist_token"`
+	TodoistProject         string            `mapstructure:"todoist_project"`
+	JiraURL                string            `mapstructure:"jira_url"`
+	JiraEmail              string            `mapstructure:"jira_email"`
+	JiraToken              string            `mapstructure:"jira_token"`
+	JiraProject            string            `mapstructure:"jira_project"`
+	JiraIssueTypes         []string          `mapstructure:"jira_issue_types"` // issue type names to sync (e.g. Story, Task, Bug); set via flag/env or default
+	Interval               time.Duration     `mapstructure:"interval"`
+	LogLevel               string            `mapstructure:"log_level"`
+	LogFilePath            string            `mapstructure:"log_file_path"`
+	JiraToTodoistStatusMap map[string]string `mapstructure:"jira_to_todoist_status_map"`
+	TodoistToJiraStatusMap map[string]string `mapstructure:"todoist_to_jira_status_map"`
 }
 
 const (
@@ -39,8 +40,8 @@ const (
 )
 
 var (
-	// DefaultStatusMap maps Todoist statuses to Jira statuses.
-	DefaultStatusMap = map[string]string{ // jira status -> todoist status
+	// DefaultJiraToTodoistStatusMap maps Jira statuses to Todoist statuses.
+	DefaultJiraToTodoistStatusMap = map[string]string{ // jira status -> todoist status
 		"Open":        "To Do",
 		"Descheduled": "To Do",
 		"Scheduled":   "In Progress",
@@ -49,6 +50,14 @@ var (
 		"Done":        "Closed",
 		"Closed":      "Closed",
 		"Blocked":     "Blocked",
+	}
+	// DefaultTodoistToJiraStatusMap maps Todoist statuses to Jira statuses.
+	DefaultTodoistToJiraStatusMap = map[string]string{ // todoist status -> jira status
+		"To Do":       "Open",
+		"In Progress": "In Progress",
+		"In Review":   "In Review",
+		"Blocked":     "Blocked",
+		"Closed":      "Closed",
 	}
 	// DefaultJiraIssueTypes Jira issue types to sync.
 	DefaultJiraIssueTypes = []string{"Story", "Task", "Bug", "Sub-task"}
@@ -76,7 +85,8 @@ func Load(opts ...LoadOption) (*Config, error) {
 	v.SetDefault("jira_issue_types", DefaultJiraIssueTypes)
 	v.SetDefault("interval", DefaultInterval)
 	v.SetDefault("log_level", DefaultLogLevel)
-	v.SetDefault("status_map", DefaultStatusMap)
+	v.SetDefault("jira_to_todoist_status_map", DefaultJiraToTodoistStatusMap)
+	v.SetDefault("todoist_to_jira_status_map", DefaultTodoistToJiraStatusMap)
 	v.SetDefault("log_file_path", DefaultLogFilePath)
 
 	v.SetConfigName(".env")
@@ -134,7 +144,7 @@ func (c *Config) Validate() error {
 
 // JiraToTodoistStatus returns the Todoist status/section name for a Jira status.
 func (c *Config) JiraToTodoistStatus(sectionName string) string {
-	if status, ok := c.StatusMap[sectionName]; ok {
+	if status, ok := c.JiraToTodoistStatusMap[sectionName]; ok {
 		return status
 	}
 	return sectionName
@@ -142,10 +152,8 @@ func (c *Config) JiraToTodoistStatus(sectionName string) string {
 
 // TodoistToJiraStatus returns the Jira status name for a Todoist status.
 func (c *Config) TodoistToJiraStatus(todoistStatus string) string {
-	for section, status := range c.StatusMap {
-		if status == todoistStatus {
-			return section
-		}
+	if status, ok := c.TodoistToJiraStatusMap[todoistStatus]; ok {
+		return status
 	}
 	return todoistStatus
 }

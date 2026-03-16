@@ -194,6 +194,21 @@ func TestADFToMarkdown(t *testing.T) {
 			want: " did something",
 		},
 		{
+			name: "mediaSingle image",
+			adf:  `{"type":"doc","version":1,"content":[{"type":"mediaSingle","content":[{"type":"media","attrs":{"id":"abc-123","type":"file","collection":"proj"}}]}]}`,
+			want: "[IMAGE, See Jira]",
+		},
+		{
+			name: "mediaGroup with multiple images",
+			adf:  `{"type":"doc","version":1,"content":[{"type":"paragraph","content":[{"type":"text","text":"See below:"}]},{"type":"mediaGroup","content":[{"type":"media","attrs":{"id":"img1","type":"file"}},{"type":"media","attrs":{"id":"img2","type":"file"}}]}]}`,
+			want: "See below:\n[IMAGE, See Jira]",
+		},
+		{
+			name: "mediaInline in paragraph",
+			adf:  `{"type":"doc","version":1,"content":[{"type":"paragraph","content":[{"type":"text","text":"Check this "},{"type":"mediaInline","attrs":{"id":"abc","type":"file"}},{"type":"text","text":" screenshot"}]}]}`,
+			want: "Check this [IMAGE, See Jira] screenshot",
+		},
+		{
 			name: "full document with mixed blocks",
 			adf: `{"type":"doc","version":1,"content":[
 				{"type":"heading","attrs":{"level":2},"content":[{"type":"text","text":"Overview"}]},
