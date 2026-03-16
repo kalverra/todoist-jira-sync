@@ -14,3 +14,6 @@ test_race:
 test_e2e:
     export RUN_E2E_TESTS := "true"
     go tool gotestsum -- -cover ./...
+
+install:
+    ./install.sh
