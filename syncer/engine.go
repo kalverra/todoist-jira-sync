@@ -551,6 +551,10 @@ func (e *Engine) pushJiraToTodoist(
 		updateReq.DueDate = &today
 	}
 
+	if updateReq.DueDate != nil && task.Due != nil && strings.HasPrefix(task.Due.Date, *updateReq.DueDate) {
+		updateReq.DueDate = nil
+	}
+
 	if _, err := e.todoist.UpdateTask(ctx, task.ID, updateReq); err != nil {
 		return fmt.Errorf("update todoist task: %w", err)
 	}
@@ -647,14 +651,16 @@ func (e *Engine) pushTodoistToJira(
 
 	if activeSections[sectionName] {
 		today := workdayDateString()
-		if _, err := e.todoist.UpdateTask(ctx, task.ID, todoist.UpdateTaskRequest{
-			DueDate: &today,
-		}); err != nil {
-			e.logger.Warn().Err(err).
-				Str("task_id", task.ID).
-				Msg("failed to set today due date on active todoist task")
+		if task.Due == nil || !strings.HasPrefix(task.Due.Date, today) {
+			if _, err := e.todoist.UpdateTask(ctx, task.ID, todoist.UpdateTaskRequest{
+				DueDate: &today,
+			}); err != nil {
+				e.logger.Warn().Err(err).
+					Str("task_id", task.ID).
+					Msg("failed to set today due date on active todoist task")
+			}
 		}
-	} else {
+	} else if task.Due != nil {
 		noneDate := "no date"
 		if _, err := e.todoist.UpdateTask(ctx, task.ID, todoist.UpdateTaskRequest{
 			DueString: &noneDate,

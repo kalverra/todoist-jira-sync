@@ -28,6 +28,9 @@ func NewClient(token string, logger zerolog.Logger) *Client {
 			return nil
 		}).
 		AddResponseMiddleware(func(_ *resty.Client, resp *resty.Response) error {
+			if resp.CascadeError != nil {
+				return nil
+			}
 			req := resp.Request
 			l.Trace().
 				Str("method", req.Method).
@@ -51,7 +54,7 @@ func NewClient(token string, logger zerolog.Logger) *Client {
 					}
 				}).
 				Msg("http round trip")
-			if resp.IsError() {
+			if resp.IsStatusFailure() {
 				return fmt.Errorf(
 					"todoist API error %d: %s",
 					resp.StatusCode(), resp.String(),

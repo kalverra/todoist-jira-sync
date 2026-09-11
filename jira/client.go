@@ -40,6 +40,9 @@ func NewClient(cfg *config.Config, logger zerolog.Logger) (*Client, error) {
 		SetHeader("Accept", "application/json").
 		SetHeader("Content-Type", "application/json").
 		AddResponseMiddleware(func(_ *resty.Client, resp *resty.Response) error {
+			if resp.CascadeError != nil {
+				return nil
+			}
 			req := resp.Request
 			ev := l.Trace().
 				Str("method", req.Method).
@@ -60,7 +63,7 @@ func NewClient(cfg *config.Config, logger zerolog.Logger) (*Client, error) {
 				ev.Str("resp_body", string(body))
 			}
 			ev.Msg("http round trip")
-			if resp.IsError() {
+			if resp.IsStatusFailure() {
 				return fmt.Errorf("jira API error %d: %s", resp.StatusCode(), body)
 			}
 			return nil
